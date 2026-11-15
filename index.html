@@ -7,8 +7,8 @@
 <meta name="description" content="Kitchen and store menu. Order on WhatsApp.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap" rel="stylesheet">
-<!--SIGN-CSS-->
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="sign.css">
 <style>
   :root {
     --bg: #ffffff;
@@ -179,12 +179,21 @@
 </head>
 <body>
 
-<!--SIGN-MARKUP-->
-<header class="site-head" id="plainHead">
-  <h1><a href="#" style="color:inherit;text-decoration:none">Gonzales Bodega</a></h1>
-  <p>Kitchen · Grocery · Open 24/7</p>
+<header class="bodega-sign" data-glow="255 104 64" title="Back to menu home">
+  <div class="bs-stage">
+    <div class="bs-halo" aria-hidden="true"></div>
+    <div class="bs-box">
+      <div class="bs-front">
+        <div class="bs-bulbs" aria-hidden="true"></div>
+        <div class="bs-panel">
+          <h1 class="bs-name" id="storeName">Gonzales Bodega</h1>
+          <p class="bs-sub" id="storeLine">Deli · Grocery · 24 Hrs</p>
+        </div>
+        <div class="bs-glare" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
 </header>
-<!--/SIGN-MARKUP-->
 
 <nav aria-label="Menu categories"><div class="scroller main" id="nav"></div><div class="scroller sub" id="subnav"></div></nav>
 
@@ -504,9 +513,12 @@ $("#mode").onclick = e => {
 };
 ["#cname", "#notes", "#addr"].forEach(s => $(s).addEventListener("input", update));
 
+const signEl = document.querySelector(".bodega-sign");
+if (signEl) { signEl.style.cursor = "pointer"; signEl.addEventListener("click", () => { location.hash = ""; }); }
+
 setInterval(markServing, 60000);
 render();
 </script>
-<!--SIGN-JS-->
+<script src="sign.js" defer></script>
 </body>
 </html>
