@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gonzales Bodega Sign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="sign.css">
+<style>
+  /* Minimal stand-in for the menu page's own styles */
+  :root { --tile: #f1f1f3; --ink: #1a1a1a; --muted: #8a8a8e; --line: #e7e7ea;
+          --serif: "Cormorant Garamond", Georgia, serif; --sans: "Inter", system-ui, sans-serif; --gutter: 16px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font-family: var(--sans); }
+  img { display: block; }
+  nav { position: sticky; top: var(--sign-h, 0px); z-index: 10; background: rgba(255,255,255,.94);
+        backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav .scroller { display: flex; gap: 22px; justify-content: center; overflow-x: auto; padding: 14px var(--gutter); }
+  nav a { flex: none; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+          text-decoration: none; padding-bottom: 4px; border-bottom: 1px solid transparent; }
+  nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  main { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter) 120px; }
+  section h2 { font-family: var(--serif); font-weight: 400; font-size: 26px; text-align: center; margin: 36px 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 12px; }
+  @media (min-width: 700px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px 14px; } }
+  .item { text-align: center; }
+  .tile { position: relative; aspect-ratio: 1 / 1; background: var(--tile); display: grid; place-items: center; width: 100%; overflow: hidden; }
+  .tile img { max-width: 78%; max-height: 72%; width: auto; height: auto; object-fit: contain; }
+  .name { font-family: var(--serif); font-size: 18px; line-height: 1.2; margin: 14px 4px 0; }
+  .sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .price { font-size: 17px; font-weight: 800; color: #000; margin-top: 8px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<header class="bodega-sign" data-glow="255 104 64">
+  <div class="bs-stage">
+    <div class="bs-halo" aria-hidden="true"></div>
+    <div class="bs-box">
+      <div class="bs-front">
+        <div class="bs-bulbs" aria-hidden="true"></div>
+        <div class="bs-panel">
+          <h1 class="bs-name" id="storeName">Gonzales Bodega</h1>
+          <p class="bs-sub" id="storeLine">Deli · Grocery · 24 Hrs</p>
+        </div>
+        <div class="bs-glare" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<nav aria-label="Menu categories"><div class="scroller">
+  <a href="#breakfast" class="on">Breakfast</a><a href="#heroes">Heroes</a><a href="#grill">Grill</a><a href="#snacks">Snacks</a>
+</div></nav>
+
+<main id="menu"></main>
+
+<script>
+  // Dummy menu so the ambient light, sticky sign and compact state can be checked.
+  var IMGS = ["bacon-egg-cheese", "chopped-cheese", "italian-hero", "cheeseburger-deluxe"];
+  var SECTIONS = [["breakfast", "Breakfast"], ["heroes", "Heroes"], ["grill", "Grill"], ["snacks", "Snacks"]];
+  var NAMES = ["Bacon, Egg & Cheese", "Chopped Cheese", "Italian Hero", "Cheeseburger Deluxe"];
+  document.getElementById("menu").innerHTML = SECTIONS.map(function (s, si) {
+    var items = "";
+    for (var i = 0; i < 8; i++) {
+      var k = (i + si) % 4;
+      items += '<div class="item"><div class="tile"><img src="images/' + IMGS[k] + '.png" alt="" loading="lazy"></div>' +
+        '<div class="name">' + NAMES[k] + '</div><div class="sub">On a roll</div>' +
+        '<div class="price">$' + (6.49 + i * .75).toFixed(2) + '</div></div>';
+    }
+    return '<section id="' + s[0] + '"><h2>' + s[1] + '</h2><div class="grid">' + items + '</div></section>';
+  }).join("");
+</script>
+<script src="sign.js" defer></script>
+</body>
+</html>
