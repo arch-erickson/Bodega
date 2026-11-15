@@ -20,9 +20,13 @@
   /* Relative control, no fixed origin: each pointer / finger / phone movement nudges the yaw by its own
      delta. The yaw stops at ±MAX_Y; moving back the other way from wherever you are turns it straight back. */
   var GAIN_PX = .022;                     // deg per px of mouse / finger movement
-  var GAIN_TILT = .35;                    // deg per degree of phone tilt (gamma)
-  var Y = { off: 0, lx: null, lg: null }; // accumulated yaw offset; last touch x; last gamma
-  function nudge(d) { Y.off = clamp(Y.off + d, -MAX_Y, MAX_Y); start(); }
+  var GAIN_TILT = .5;                     // deg of yaw per degree the phone is turned left/right (gamma)
+  var GAIN_BETA = .4;                     // deg of pitch per degree the phone is tipped toward/away (beta)
+  var MAX_Y_PHONE = 9, MAX_X_PHONE = 6;   // phones: a bigger range so "orbiting" the phone clearly turns the sign
+  var RECENTER_S = 2.2;                   // phones: once the phone is still (~0.8 s) the sign eases back to centre
+  var Y = { off: 0, offX: 0, lx: null, lg: null, lb: null, t: -1e9 };   // yaw / pitch offsets; last touch x, gamma, beta
+  function nudge(d) { var m = noHover ? MAX_Y_PHONE : MAX_Y; Y.off = clamp(Y.off + d, -m, m); Y.t = performance.now(); start(); }
+  function nudgeX(d) { Y.offX = clamp(Y.offX + d, -MAX_X_PHONE, MAX_X_PHONE); Y.t = performance.now(); start(); }
   var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
   var STEP = 3.6;                         // seconds per palette colour
   var COLOR_MS = 66;                      // colour updates ~15 fps
@@ -154,7 +158,7 @@
     var q = function (c) { return rootEl.querySelector(c); };
     var s = { root: rootEl, stage: q(".bs-stage"), name: q(".bs-name"), sub: q(".bs-sub"),
       words: [], text: [], leds: [], cols: [], gl: null,
-      ry: REST_Y, near: 0, inten: .5, compact: false };
+      ry: REST_Y, rx: 0, near: 0, inten: .5, compact: false };
     if (!s.stage || !s.name) return;
     rootEl._bodegaSign = s;
     rootEl.classList.add("bs-pending");
@@ -415,7 +419,7 @@
   function draw(s) {
     var g = s.gl;
     if (!g) return;
-    g.tilt.rotation.set(0, s.ry * DEG, 0);                   // yaw only: verticals stay vertical
+    g.tilt.rotation.set(s.rx * DEG, s.ry * DEG, 0);          // yaw (+ a little pitch from the phone tipping)
     for (var i = 0; i < g.words.length; i++) {
       var w = g.words[i], c = s.cols[i];
       if (c) {
@@ -609,6 +613,13 @@
     var useOri = !P.on && now - O.t < 1500;
     var primary = signs[0], pcx = 0, pcy = 0, tiltSpeed = 0;
 
+    /* phones: when the phone has been still for a moment, ease the sign back to facing straight ahead */
+    if (noHover && now - Y.t > 800 && (Y.off || Y.offX)) {
+      var kr = Math.exp(-dt / RECENTER_S);
+      Y.off = Math.abs(Y.off) < .01 ? 0 : Y.off * kr;
+      Y.offX = Math.abs(Y.offX) < .01 ? 0 : Y.offX * kr;
+    }
+
     /* reads */
     var signH = primary.root.getBoundingClientRect().height;
     var colorTick = now - lastColor >= COLOR_MS;
@@ -624,12 +635,13 @@
       } else if (!useOri && !reduce && (noHover || !P.mouse)) {   // idle sway until someone interacts
         ty += Math.sin(t * .5 + idx) * 2.5;
       }
-      var pry = s.ry, pn = s.near;
+      var pry = s.ry, prx = s.rx, pn = s.near;
       s.ry += (ty - s.ry) * kT;
       s.near += (near - s.near) * kN;
       s.inten = .45 + .55 * s.near;
-      var moved = Math.abs(s.ry - pry) > .002 || Math.abs(s.near - pn) > .002;
-      if (idx === 0) tiltSpeed = Math.abs(s.ry - pry) / dt;
+      s.rx += (Y.offX - s.rx) * kT;
+      var moved = Math.abs(s.ry - pry) > .002 || Math.abs(s.rx - prx) > .002 || Math.abs(s.near - pn) > .002;
+      if (idx === 0) tiltSpeed = (Math.abs(s.ry - pry) + Math.abs(s.rx - prx)) / dt;
 
       if (colorTick) {
         var c = paint(s, t, reduce);
@@ -682,11 +694,12 @@
     O.bb += (b - O.bb) * k;
     O.dx = clamp((g - O.bg) / 20, -1, 1);
     O.dy = clamp((b - O.bb) / 20, -1, 1);
-    if (Y.lg != null) {                                      // relative: turning the phone nudges the yaw
-      var dg = g - Y.lg;
-      if (Math.abs(dg) < 30) nudge(dg * GAIN_TILT);           // ignore jumps (e.g. gamma wrapping at ±90°)
+    if (Y.lg != null) {                                      // relative: turning / tipping the phone nudges the sign
+      var dg = g - Y.lg, db = b - Y.lb;
+      if (Math.abs(dg) < 30 && Math.abs(dg) > .05) nudge(dg * GAIN_TILT);    // ignore jumps (gamma wraps at ±90°) and sensor noise
+      if (Math.abs(db) < 30 && Math.abs(db) > .05) nudgeX(-db * GAIN_BETA);   // tip the top away → see the top of the letters
     }
-    Y.lg = g;
+    Y.lg = g; Y.lb = b;
     O.t = now;
     start();
   }
