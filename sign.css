@@ -42,6 +42,7 @@
   --bs-pad-b: 18px;
   --bs-sub-h: 27px;                                   /* tagline block (gap + text) */
   --bs-subvis: 1;
+  --bs-hint-h: 0px;                                   /* iPhone "tap to tilt" hint, only while shown */
   --bs-scale: 1;
   --bs-ease: cubic-bezier(.2, .75, .2, 1);
 
@@ -51,7 +52,7 @@
   display: block;
   box-sizing: border-box;
   width: 100%;
-  height: calc((var(--bs-pad-t) + var(--bs-nh)) * var(--bs-scale) + var(--bs-sub-h) * var(--bs-subvis) + var(--bs-pad-b));
+  height: calc((var(--bs-pad-t) + var(--bs-nh)) * var(--bs-scale) + var(--bs-sub-h) * var(--bs-subvis) + var(--bs-hint-h) + var(--bs-pad-b));
   margin: 0;
   padding: 0;
   text-align: center;
@@ -257,3 +258,15 @@ body.sign-lit .price {
   .tile .bs-lit,
   .tile .bs-rim { transition: none; }
 }
+
+/* ---------- iPhone: "tap to tilt" hint (shown only until iOS answers the motion-permission request) ---------- */
+.bodega-sign .bs-motion {
+  display: block; margin: 8px auto 0; padding: 5px 11px;
+  font: 600 10px/1.2 "DM Sans", system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase;
+  color: #6b6b70; background: #f1f1f3; border: 0; border-radius: 999px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; position: relative; z-index: 3;
+}
+.bodega-sign .bs-motion[hidden] { display: none; }
+.bodega-sign.has-hint { --bs-hint-h: 30px; }
+.bodega-sign.is-compact { --bs-hint-h: 0px; }
+.bodega-sign.is-compact .bs-motion { display: none; }

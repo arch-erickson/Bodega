@@ -20,13 +20,19 @@
   /* Relative control, no fixed origin: each pointer / finger / phone movement nudges the yaw by its own
      delta. The yaw stops at ±MAX_Y; moving back the other way from wherever you are turns it straight back. */
   var GAIN_PX = .022;                     // deg per px of mouse / finger movement
-  var GAIN_TILT = .5;                     // deg of yaw per degree the phone is turned left/right (gamma)
-  var GAIN_BETA = .4;                     // deg of pitch per degree the phone is tipped toward/away (beta)
+  var GAIN_TILT = .9;                     // deg of yaw per degree the phone is turned left/right (gamma)
+  var GAIN_BETA = .7;                     // deg of pitch per degree the phone is tipped toward/away (beta)
   var MAX_X = 3;                          // desktop: limit of the pitch (up/down tilt) from vertical mouse movement (deg)
-  var MAX_Y_PHONE = 5, MAX_X_PHONE = 4;   // phones: a bigger range so "orbiting" the phone clearly turns the sign
+  var MAX_Y_PHONE = 9, MAX_X_PHONE = 7;   // phones: a bigger range so "orbiting" the phone clearly turns the sign
   var ORI_SMOOTH = .7, ORI_DEAD = .12;    // phones: low-pass the sensor and ignore sub-0.12° jitter (no drifting)
   var Y = { off: 0, offX: 0, lx: null, ly: null, lg: null, lb: null, fg: null, fb: null, drag: false, t: -1e9 };   // yaw / pitch offsets; last touch x, gamma, beta
   function nudge(d) { var m = noHover ? MAX_Y_PHONE : MAX_Y; Y.off = clamp(Y.off + d, -m, m); Y.t = performance.now(); start(); }
+  /* iOS 13+ motion permission. It can only be requested from a real tap (a touchend that ends a scroll does
+     NOT count), so we keep listening until iOS answers granted/denied, and show a small "tap to tilt" hint. */
+  var PERM = { api: !!(window.DeviceOrientationEvent && typeof window.DeviceOrientationEvent.requestPermission === "function"),
+               state: "unknown", events: 0, last: null, hint: null };
+  var DBG = /[?&]debug(=|&|$)/.test(location.search), dbgLog = [];
+  function dbg(m) { if (!DBG) return; dbgLog.push(new Date().toTimeString().slice(0, 8) + " " + m); if (dbgLog.length > 8) dbgLog.shift(); }
   function nudgeX(d) { var m = noHover ? MAX_X_PHONE : MAX_X; Y.offX = clamp(Y.offX + d, -m, m); Y.t = performance.now(); start(); }
   var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
   var STEP = 3.6;                         // seconds per palette colour
@@ -407,7 +413,7 @@
     var a = hw * Math.cos(th), zp = -hw * Math.sin(th), xo = -a * zp / d;
     var zf = DEPTH / 2;                                                        // front faces sit this far in front of z = 0
     var halfW = (a + xo) * d / (d - zp - zf) + .22;                          // projected half width at rest (em)
-    if (noHover) halfW *= 1.14;                                               // phones: room for the near end to grow when tilted
+    if (noHover) halfW *= 1.3;                                                // phones: room for the near end to grow when tilted
     var fit = Math.min(1, (W - 24) / 2 / fs / halfW);                        // never wider than the page
     g.camera.aspect = W / (half * 2);
     g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * d * fit)) / DEG;     // 1 world unit = 1em on screen at z = 0
@@ -677,6 +683,8 @@
   }
   function onOrient(e) {
     if (e.gamma == null || e.beta == null) return;
+    PERM.events++; PERM.last = [e.alpha, e.beta, e.gamma];
+    if (PERM.events === 1) { dbg("first orientation event"); if (PERM.state !== "granted") PERM.state = PERM.api ? "granted" : "not needed"; motionHint(); }
     var ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
     var g = e.gamma, b = e.beta;
     if (ang === 90) { g = e.beta; b = -e.gamma; }
@@ -699,14 +707,60 @@
     O.t = now;
     start();
   }
-  function askOrientation() {                                // iOS 13+: needs a user gesture; never blocks
-    document.removeEventListener("touchend", askOrientation);
-    document.removeEventListener("click", askOrientation);
-    var D = window.DeviceOrientationEvent;
-    if (D && typeof D.requestPermission === "function") {
-      try { D.requestPermission().catch(function () {}); } catch (err) { /* ignore */ }
-    }
+  function askOrientation(src) {                             // must run synchronously inside a real tap
+    if (!PERM.api || PERM.state === "granted" || PERM.state === "denied" || PERM.state === "asking") return;
+    PERM.state = "asking"; dbg("requestPermission() from " + src);
+    try {
+      window.DeviceOrientationEvent.requestPermission().then(function (r) {
+        PERM.state = r; dbg("permission: " + r); motionHint();
+      }).catch(function (err) {
+        PERM.state = "unknown"; dbg("permission error: " + (err && (err.name + " " + err.message)));
+      });
+    } catch (err) { PERM.state = "unknown"; dbg("permission threw: " + err); }
   }
+  var tap0 = null;                                           // only a real tap (not a scroll) may ask for permission
+  function onTapStart(e) { var t = e.touches && e.touches[0]; tap0 = t ? { x: t.clientX, y: t.clientY, t: performance.now() } : null; }
+  function onTapEnd(e) {
+    var t = e.changedTouches && e.changedTouches[0];
+    if (tap0 && t && Math.abs(t.clientX - tap0.x) < 12 && Math.abs(t.clientY - tap0.y) < 12 && performance.now() - tap0.t < 800) askOrientation("tap");
+    tap0 = null;
+  }
+  function motionHint() {                                     // small "tap to tilt" hint under the sign (iOS only, until answered)
+    var want = PERM.api && PERM.state !== "granted" && PERM.state !== "denied" && !PERM.events;
+    if (want && !PERM.hint && signs[0]) {
+      var b = PERM.hint = el("button", "bs-motion", signs[0].root.querySelector(".bs-stage"));
+      b.type = "button";
+      b.textContent = "Tap to tilt the sign with your phone";
+      b.addEventListener("click", function (e) { e.stopPropagation(); askOrientation("hint"); });
+    }
+    if (PERM.hint) PERM.hint.hidden = !want;
+    if (signs[0]) signs[0].root.classList.toggle("has-hint", !!(PERM.hint && want));
+  }
+  function debugPanel() {                                     // ?debug: on-screen log for testing on a real iPhone
+    if (!DBG) return;
+    var box = el("pre", "bs-debug", document.body);
+    box.style.cssText = "position:fixed;left:6px;right:6px;bottom:6px;z-index:99;margin:0;padding:8px 10px;max-height:46vh;overflow:auto;" +
+      "background:rgba(0,0,0,.82);color:#9f9;font:11px/1.35 ui-monospace,Menlo,monospace;white-space:pre-wrap;border-radius:8px;pointer-events:auto";
+    window.addEventListener("error", function (e) { dbg("JS error: " + e.message + " @" + (e.filename || "").split("/").pop() + ":" + e.lineno); });
+    window.addEventListener("unhandledrejection", function (e) { dbg("rejection: " + (e.reason && (e.reason.message || e.reason))); });
+    var frames = 0, fps = 0, t0 = performance.now();
+    (function count() { frames++; var n = performance.now(); if (n - t0 > 1000) { fps = frames; frames = 0; t0 = n; } requestAnimationFrame(count); })();
+    setInterval(function () {
+      var s0 = signs[0], L = PERM.last, f = function (v) { return v == null ? "-" : (+v).toFixed(1); };
+      box.textContent = [
+        "SIGN DEBUG  " + navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 90),
+        "secure: " + window.isSecureContext + "   hover:none: " + noHover + "   reduce-motion: " + mqReduce.matches,
+        "DeviceOrientationEvent: " + !!window.DeviceOrientationEvent + "   requestPermission: " + PERM.api + "   permission: " + PERM.state,
+        "orientation events: " + PERM.events + "   alpha/beta/gamma: " + (L ? f(L[0]) + " / " + f(L[1]) + " / " + f(L[2]) : "none yet"),
+        "screen angle: " + ((screen.orientation && screen.orientation.angle) != null ? screen.orientation.angle : window.orientation) + "   viewport: " + innerWidth + "x" + innerHeight,
+        "offset yaw/pitch: " + Y.off.toFixed(2) + " / " + Y.offX.toFixed(2) + "   sign ry/rx: " + (s0 ? s0.ry.toFixed(2) + " / " + s0.rx.toFixed(2) : "-"),
+        "3D: three " + (T ? "loaded" : "not loaded") + ", font " + (FONT ? "ok" : "-") + ", WebGL " + (s0 && s0.gl ? "on" : "off (fallback text)") + "   fps: " + fps,
+        "log:"
+      ].concat(dbgLog.length ? dbgLog : ["(nothing yet - tap the page, then rotate the phone)"]).join(String.fromCharCode(10));
+    }, 250);
+    dbg("debug on");
+  }
+  window.BodegaSignDebug = { perm: PERM, offsets: Y };
   function bind() {
     var o = { passive: true };
     window.addEventListener("pointermove", function (e) {
@@ -741,8 +795,9 @@
     document.addEventListener("visibilitychange", function () { lastT = 0; start(); });
     if (window.DeviceOrientationEvent) {
       window.addEventListener("deviceorientation", onOrient, o);
-      document.addEventListener("touchend", askOrientation, o);
-      document.addEventListener("click", askOrientation, o);
+      document.addEventListener("touchstart", onTapStart, o);
+      document.addEventListener("touchend", onTapEnd, o);
+      document.addEventListener("click", function () { askOrientation("click"); }, o);
     }
     if (mqReduce.addEventListener) mqReduce.addEventListener("change", reset);
   }
@@ -760,6 +815,7 @@
     if (!signs.length) return;
     if (!document.querySelector(".sign-ambient")) hidden(el("div", "sign-ambient", document.body));
     document.body.classList.add("sign-lit");
+    motionHint(); debugPanel();
     var g0 = signs[0].root.getAttribute("data-glow");
     setRoot("--sign-glow", g0 ? g0.trim() : rgb(PAL[0]));
     signs.forEach(function (s) { paint(s, performance.now() / 1000, mqReduce.matches); });
