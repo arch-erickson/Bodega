@@ -1,6 +1,7 @@
 /* =====================================================================
-   Gonzales Bodega — free-floating 3D channel letters (Three.js / WebGL),
-   sticky header that compacts on scroll. No box, no background, no base.
+   Gonzales Bodega — free-floating 3D channel letters (Three.js / WebGL), two stacked lines
+   (GONZALES / BODEGA) seen in two-point perspective: eye level at mid-height, verticals vertical,
+   turned about the vertical axis only. Sticky header that compacts on scroll. No box, no background.
    ---------------------------------------------------------------------
    MARKUP (a direct child of <body>, so position: sticky follows the page):
 
@@ -35,10 +36,10 @@
 
 /* ---------- wrapper: sticky, clean white backdrop ---------- */
 .bodega-sign {
-  --bs-fs: min(60px, calc((100vw - 48px) / 12.6));   /* 1em of the letters (cap height = .69em) */
-  --bs-nh: calc(var(--bs-fs) * .76);                  /* letters block height (one line) */
-  --bs-pad-t: 28px;
-  --bs-pad-b: 20px;
+  --bs-fs: min(52px, calc((100vw - 40px) / 7));      /* 1em of the letters (cap height = .69em) */
+  --bs-nh: calc(var(--bs-fs) * 1.95);                 /* two stacked lines, incl. the taller near end */
+  --bs-pad-t: 26px;
+  --bs-pad-b: 18px;
   --bs-sub-h: 27px;                                   /* tagline block (gap + text) */
   --bs-subvis: 1;
   --bs-scale: 1;
@@ -61,17 +62,15 @@
   -webkit-user-select: none;
   user-select: none;
 }
-.bodega-sign.is-compact { --bs-scale: .6; --bs-subvis: 0; --bs-pad-b: 9px; }
-@media (max-width: 600px) {                            /* phones: GONZALES / BODEGA stacked */
+.bodega-sign.is-compact { --bs-scale: .52; --bs-subvis: 0; --bs-pad-b: 9px; }
+@media (max-width: 600px) {
   .bodega-sign {
-    --bs-fs: min(42px, calc((100vw - 56px) / 6.6));
-    --bs-nh: calc(var(--bs-fs) * 1.64);
-    --bs-lines: 2;
+    --bs-fs: min(44px, calc((100vw - 40px) / 7));
     --bs-pad-t: 18px;
     --bs-pad-b: 14px;
     --bs-sub-h: 22px;
   }
-  .bodega-sign.is-compact { --bs-scale: .56; --bs-pad-b: 7px; }
+  .bodega-sign.is-compact { --bs-scale: .6; --bs-pad-b: 8px; }
 }
 
 /* ---------- stage: scales as one piece for the compact state ---------- */
@@ -115,8 +114,7 @@
   white-space: nowrap;
   color: #e4342b;
 }
-.bodega-sign .bs-letters { display: flex; gap: 0 .33em; align-items: center; justify-content: center; transition: opacity .3s ease; }
-@media (max-width: 600px) { .bodega-sign .bs-letters { flex-direction: column; } }
+.bodega-sign .bs-letters { display: flex; flex-direction: column; gap: .04em 0; align-items: center; justify-content: center; transition: opacity .3s ease; }
 .bodega-sign .bs-word {
   display: block;
   color: rgb(var(--c1, 228 52 43));
@@ -247,7 +245,8 @@ body.sign-lit .price {
   text-shadow: 0 0 .55em rgb(var(--sign-glow, 255 104 64) / .22);
 }
 
-/* ---------- reduced motion: static sign ---------- */
+/* ---------- reduced motion: no transitions (sign.js also stops the idle sway, LED flashing and light pulse;
+   the sign still turns with the pointer / device, and the colours still drift) ---------- */
 @media (prefers-reduced-motion: reduce) {
   .bodega-sign,
   .bodega-sign .bs-stage,

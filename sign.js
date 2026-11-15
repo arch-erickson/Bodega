@@ -10,8 +10,10 @@
   var FONT_URL = new URL("fonts/archivo-black.json", BASE).href;
 
   var DEG = Math.PI / 180;
-  var REST_Y = -18, REST_X = 9;           // resting angle (deg): yaw (+ faces right), pitch (+ faces down)
-  var MAX_Y = 12, MAX_X = 8;              // extra tilt from pointer / device (deg)
+  /* two-point perspective: the camera sits at the mid-height of the two-line block, no pitch, no roll,
+     so verticals stay vertical; the sign only turns about its vertical axis */
+  var REST_Y = -30;                       // resting yaw (deg, + faces right): right end near, left end receding
+  var MAX_Y = 12;                         // extra yaw from pointer / device (deg)
   var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
   var STEP = 3.6;                         // seconds per palette colour
   var COLOR_MS = 66;                      // colour updates ~15 fps
@@ -21,8 +23,8 @@
 
   /* letter construction, in em (cap height = .688em) */
   var DEPTH = .17;                        // extrusion ≈ 25% of the cap height
-  var TRACK = .03, LINE = .84, FOV = 30, CAM_K = 2.3;
-  var WALL_Z = -.5;                       // the "wall" the glow / shadow lands on, behind the letters
+  var TRACK = .03, LINE = .84, CAM_K = 1.08;   // camera distance = block width × CAM_K (close: strong convergence)
+  var WALL_Z = -.2;                       // the "wall" the glow / shadow lands on, behind the letters
   var MASK_R = 48, MASK_PAD = .95;        // glow mask: px per em, padding in em
 
   var mm = function (q) { return window.matchMedia ? window.matchMedia(q) : { matches: false }; };
@@ -37,7 +39,7 @@
   var tiles = { seen: new WeakSet(), vis: new Set(), dirty: new Set(), io: null, ro: null, lastScan: -1e9, pass: 0 };
   var tileList = [], tileRects = [];
   var pulse = 1, scrollT = -1e9;          // light "energy": bumps on scroll / tilt / hue shift, then dissolves
-  var LIT_REST = .16, LIT_STILL = .5;     // resting level of the light on products; level when motion is reduced
+  var LIT_REST = .16, LIT_STILL = .4;     // resting level of the light on products; fixed level when motion is reduced
   var T = null, FONT = null;              // three.js module + glyph data, once loaded
   var tmpA = [0, 0, 0], tmpB = [0, 0, 0];
 
@@ -73,13 +75,13 @@
 
   function paint(s, t, still) {
     for (var i = 0; i < s.words.length; i++) {
-      var x = still ? i * 3 : t / STEP + i * WORD_OFFSET;    // still: red / green
+      var x = t / STEP + i * WORD_OFFSET;
       var col = s.cols[i] || (s.cols[i] = { c1: [0, 0, 0], c2: [0, 0, 0] });
       palAt(x, col.c1); palAt(x + .8, col.c2);
       setVar(s.words[i], "--c1", rgb(col.c1));               // fallback letters follow the cycle too
     }
     for (var j = 0; j < s.leds.length; j++) {
-      var l = s.leds[j], c = still ? LED[6] : LED[Math.floor(t / l.dur + l.ph) % LED.length];
+      var l = s.leds[j], c = still ? LED[(j * 2) % 6] : LED[Math.floor(t / l.dur + l.ph) % LED.length];   // still: fixed dim colours
       if (l.c !== c) {
         l.c = c;
         l.el.style.color = "rgb(" + rgb(c) + " / .72)";
@@ -128,7 +130,7 @@
     var q = function (c) { return rootEl.querySelector(c); };
     var s = { root: rootEl, stage: q(".bs-stage"), name: q(".bs-name"), sub: q(".bs-sub"),
       words: [], text: [], leds: [], cols: [], gl: null,
-      rx: REST_X, ry: REST_Y, near: 0, inten: .5, compact: false };
+      ry: REST_Y, near: 0, inten: .5, compact: false };
     if (!s.stage || !s.name) return;
     rootEl._bodegaSign = s;
     rootEl.classList.add("bs-pending");
@@ -141,7 +143,7 @@
     }
     buildName(s);
     buildLeds(s);
-    if (window.ResizeObserver) new ResizeObserver(function () { sizeGL(s); measure(); if (mqReduce.matches) draw(s); }).observe(s.stage);
+    if (window.ResizeObserver) new ResizeObserver(function () { sizeGL(s); measure(); start(); }).observe(s.stage);
     rootEl.addEventListener("transitionend", function (e) { if (e.target === rootEl) measure(); });
     signs.push(s);
   }
@@ -266,8 +268,8 @@
     renderer.toneMapping = T.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     var g = s.gl = { canvas: canvas, renderer: renderer, scene: new T.Scene(), words: [], key: "", lines: 0, blockW: 1,
-      camera: new T.PerspectiveCamera(FOV, 2, .1, 60), tilt: new T.Group(), wall: new T.Group(), rootG: new T.Group() };
-    g.rootG.add(g.wall, g.tilt);
+      camera: new T.PerspectiveCamera(30, 2, .1, 80), tilt: new T.Group(), rootG: new T.Group() };
+    g.rootG.add(g.tilt);
     g.scene.add(g.rootG);
     var key = new T.DirectionalLight(0xffffff, 2.4);
     key.position.set(-2.5, 3.5, 4);
@@ -289,7 +291,7 @@
   function buildWords(s) {
     var g = s.gl;
     g.words.forEach(function (w) {                           // text changed: drop the old meshes
-      g.tilt.remove(w.grp); g.wall.remove(w.wall);
+      g.tilt.remove(w.grp); g.tilt.remove(w.wall);
       w.geos.forEach(function (x) { x.dispose(); });
       w.mats.forEach(function (x) { x.dispose(); });
       w.mask.tex.dispose();
@@ -326,44 +328,40 @@
       grp.add(bloom);
       var wall = new T.Mesh(plane, mWall);
       wall.renderOrder = -1;
-      wall.scale.setScalar(1.22);
-      g.tilt.add(grp); g.wall.add(wall);
+      wall.scale.setScalar(1.1);
+      g.tilt.add(grp, wall);
       g.words.push({ grp: grp, wall: wall, cx: cx, cy: cy, width: ws.width, mFace: mFace, mBloom: mBloom, uC1: uC1.value, uC2: uC2.value, uGlow: uGlow,
         geos: [body, rim, face, plane], mats: [mFace, mWall, mBloom], mask: mask });
     });
     g.lines = 0;
   }
 
-  /* place the words: one line, or stacked when the CSS says --bs-lines: 2 */
-  function layout(s, lines) {
-    var g = s.gl, cap = FONT.capHeight / FONT.unitsPerEm, n = g.words.length;
-    var space = (glyphOf(" ") ? glyphOf(" ").a / FONT.unitsPerEm : .33) + TRACK;
-    var stacked = lines > 1 && n > 1, i, w, total = 0, maxW = 0;
-    for (i = 0; i < n; i++) { total += g.words[i].width + (i ? space : 0); maxW = Math.max(maxW, g.words[i].width); }
-    var blockH = stacked ? (n - 1) * LINE + cap : cap, x = -total / 2;
+  /* place the words: always stacked, one word per line, centred as a block */
+  function layout(s) {
+    var g = s.gl, cap = FONT.capHeight / FONT.unitsPerEm, n = g.words.length, i, w, maxW = 0;
+    for (i = 0; i < n; i++) maxW = Math.max(maxW, g.words[i].width);
+    var blockH = (n - 1) * LINE + cap;
     for (i = 0; i < n; i++) {
       w = g.words[i];
-      var px = stacked ? -w.width / 2 : x, py = stacked ? blockH / 2 - cap - i * LINE : -cap / 2;
-      w.grp.position.set(px, py, DEPTH / 2);                 // tilt pivot runs through the middle of the solid
-      w.wx = px + w.cx; w.wy = py + w.cy;
-      x += w.width + space;
+      var px = -w.width / 2, py = blockH / 2 - cap - i * LINE;
+      w.grp.position.set(px, py, DEPTH / 2);                 // the yaw axis runs through the middle of the solid
+      w.wall.position.set(px + w.cx, py + w.cy - .02, DEPTH / 2 - DEPTH + WALL_Z);   // glow / shadow plane just behind
     }
-    g.lines = lines;
-    g.blockW = stacked ? maxW : total;
+    g.lines = n;
+    g.blockW = maxW;
   }
 
-  /* canvas follows the stage; its centre sits on the centre of the h1 so the view is head-on */
+  /* canvas follows the stage; its centre (= the camera's eye level) sits on the centre of the h1 */
   function sizeGL(s) {
     var g = s.gl;
     if (!g) return;
     var W = s.stage.offsetWidth, SH = s.stage.offsetHeight;
     if (!W || !SH) return;
     var fs = parseFloat(getComputedStyle(s.name).fontSize) || 48;
-    var lines = parseInt(getComputedStyle(s.root).getPropertyValue("--bs-lines"), 10) || 1;
     var yc = s.name.offsetTop + s.name.offsetHeight / 2;
     var half = Math.ceil(Math.max(yc, SH - yc) + fs * .7);
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var key = [W, half, yc, fs, lines, dpr].join("|");
+    var key = [W, half, yc, fs, dpr].join("|");
     if (key === g.key) return;
     g.key = key;
     g.canvas.style.width = W + "px";
@@ -371,33 +369,35 @@
     g.canvas.style.top = (yc - half) + "px";
     g.renderer.setPixelRatio(dpr);
     g.renderer.setSize(W, half * 2, false);
-    if (lines !== g.lines) layout(s, lines);
-    var fit = Math.min(1, (W - 28) / (g.blockW * 1.04 * fs));              // never wider than the page
-    var dist = Math.max(14, g.blockW * fit * CAM_K);                        // far enough that the ends don't balloon
+    if (!g.lines) layout(s);
+    /* camera straight ahead at eye level; close enough that the near end is clearly taller than the far end.
+       The block is nudged sideways so that, at the resting yaw, its two ends are equally far from the centre. */
+    var th = REST_Y * DEG, hw = g.blockW / 2, d = g.blockW * CAM_K;
+    var a = hw * Math.cos(th), zp = -hw * Math.sin(th), xo = -a * zp / d;
+    var halfW = (a + xo) * d / (d - zp) + .22;                               // projected half width at rest (em)
+    var fit = Math.min(1, (W - 24) / 2 / fs / halfW);                        // never wider than the page
     g.camera.aspect = W / (half * 2);
-    g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * dist)) / DEG;       // 1 world unit = 1em on screen at z = 0
-    g.camera.position.z = dist;
+    g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * d * fit)) / DEG;     // 1 world unit = 1em on screen at z = 0
+    g.camera.position.set(0, 0, d * fit);
     g.camera.updateProjectionMatrix();
     g.rootG.scale.setScalar(fit);
+    g.rootG.position.x = xo * fit;
     g.dirty = true;
   }
 
   function draw(s) {
     var g = s.gl;
     if (!g) return;
-    var yaw = s.ry * DEG, pitch = s.rx * DEG, glow = .21 + .12 * s.near;
-    g.tilt.rotation.set(pitch, yaw, 0);
-    var sx = -Math.sin(yaw) * .32, sy = Math.sin(pitch) * .32 - .03;       // glow / shadow slide with the tilt
+    g.tilt.rotation.set(0, s.ry * DEG, 0);                   // yaw only: verticals stay vertical
     for (var i = 0; i < g.words.length; i++) {
       var w = g.words[i], c = s.cols[i];
       if (c) {
         w.uC1.set(c.c1[0] / 255, c.c1[1] / 255, c.c1[2] / 255);
         w.uC2.set(c.c2[0] / 255, c.c2[1] / 255, c.c2[2] / 255);
       }
-      w.uGlow.value = glow;
+      w.uGlow.value = .15 + .1 * s.near;
       w.mBloom.uniforms.uGlow.value = .3 + .15 * s.near;
-      w.mFace.uniforms.uSheen.value = .5 - s.ry / 30;
-      w.wall.position.set(w.wx + sx, w.wy + sy, WALL_Z);
+      w.mFace.uniforms.uSheen.value = .5 - (s.ry - REST_Y) / 30;
     }
     g.renderer.render(g.scene, g.camera);
     g.dirty = false;
@@ -439,7 +439,6 @@
       var c = s.compact ? y > COMPACT_OFF : y > COMPACT_ON;
       if (c !== s.compact) { s.compact = c; s.root.classList.toggle("is-compact", c); changed = true; }
     });
-    if (changed && mqReduce.matches) requestAnimationFrame(measure);
     kick();
   }
   function scanTiles(now) {
@@ -567,24 +566,18 @@
       setVar(tl, "--cx", Math.round(-ux * 12) + "px");
     }
   }
-  function staticPass() {                                    // reduced motion: same light, no pointer tracking
-    tiles.pass = 0;
-    if (!signs.length || !mqReduce.matches) return;
-    var r = signs[0].root.getBoundingClientRect();
-    lightTiles(performance.now(), r.left + r.width / 2, LIT_STILL);
-  }
-  function kick() {                                          // something about the tiles changed
-    if (mqReduce.matches) { if (!tiles.pass) tiles.pass = requestAnimationFrame(staticPass); }
-    else start();
-  }
+  function kick() { start(); }                               // something about the tiles changed
 
-  /* ---------- the one rAF loop (stops when the tab is hidden or motion is reduced) ---------- */
+  /* ---------- the one rAF loop (stops when the tab is hidden) ----------
+     Reduced motion: the sign still turns with the pointer / device (the user's own input, eased more gently)
+     and the colours still drift, but nothing moves on its own: no idle sway, no LED flashing, no light pulse. */
   function tick(now) {
     raf = 0;
-    if (mqReduce.matches || !signs.length) return;
+    if (!signs.length) return;
+    var reduce = mqReduce.matches;
     var dt = Math.min(.05, lastT ? (now - lastT) / 1000 : .016);
     lastT = now;
-    var kT = 1 - Math.exp(-dt * 6), kN = 1 - Math.exp(-dt * 5);
+    var kT = 1 - Math.exp(-dt * (reduce ? 2.6 : 6)), kN = 1 - Math.exp(-dt * 5);
     var vw = window.innerWidth, vh = window.innerHeight, t = now / 1000;
     var useOri = !P.on && now - O.t < 1500;
     var primary = signs[0], pcx = 0, pcy = 0, tiltSpeed = 0;
@@ -597,29 +590,26 @@
     for (var idx = 0; idx < signs.length; idx++) {
       var s = signs[idx], r = s.name.getBoundingClientRect();
       var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var ty = REST_Y, tx = REST_X, near = 0;
+      var ty = REST_Y, near = 0;
       if (P.on) {
         var dx = clamp((P.x - cx) / (vw / 2), -1, 1);
-        var dy = clamp((P.y - cy) / Math.max(120, P.y > cy ? vh - cy : cy), -1, 1);
-        ty = dx * MAX_Y + REST_Y * (1 - Math.abs(dx));       // faces the pointer; rest angle fades out toward the edges
-        tx = dy * MAX_X + REST_X * (1 - Math.abs(dy));
+        ty = REST_Y + dx * MAX_Y;                            // turns toward the pointer, about the vertical axis only
         var ex = Math.max(r.left - P.x, 0, P.x - r.right), ey = Math.max(r.top - P.y, 0, P.y - r.bottom);
         near = clamp(1 - Math.sqrt(ex * ex + ey * ey) / 260, 0, 1);
       } else if (useOri) {
-        ty = REST_Y * .5 + O.dx * MAX_Y; tx = REST_X + O.dy * MAX_X;
-      } else if (noHover || !P.mouse) {                      // idle sway
+        ty = REST_Y + O.dx * MAX_Y;                          // phone tilted left / right
+      } else if (!reduce && (noHover || !P.mouse)) {         // idle sway
         ty = REST_Y + Math.sin(t * .5 + idx) * 4;
-        tx = REST_X + Math.sin(t * .33 + idx) * 2;
       }
-      var prx = s.rx, pry = s.ry, pn = s.near;
-      s.rx += (tx - s.rx) * kT; s.ry += (ty - s.ry) * kT;
+      var pry = s.ry, pn = s.near;
+      s.ry += (ty - s.ry) * kT;
       s.near += (near - s.near) * kN;
       s.inten = .45 + .55 * s.near;
-      var moved = Math.abs(s.rx - prx) + Math.abs(s.ry - pry) > .002 || Math.abs(s.near - pn) > .002;
-      if (idx === 0) tiltSpeed = (Math.abs(s.rx - prx) + Math.abs(s.ry - pry)) / dt;
+      var moved = Math.abs(s.ry - pry) > .002 || Math.abs(s.near - pn) > .002;
+      if (idx === 0) tiltSpeed = Math.abs(s.ry - pry) / dt;
 
       if (colorTick) {
-        var c = paint(s, t, false);
+        var c = paint(s, t, reduce);
         if (idx === 0 && c) setRoot("--sign-glow", rgb(c));
       }
       if (s.gl && (moved || colorTick || s.gl.dirty)) draw(s);   // render only when something changed
@@ -629,7 +619,7 @@
     /* light position: pointer, device tilt, else sign centre */
     var lx = pcx, ly = pcy;
     if (P.on) { lx = P.x; ly = P.y; }
-    else if (useOri) { lx = pcx + (primary.ry - REST_Y * .5) / MAX_Y * vw * .45; ly = pcy + vh * .35 + (primary.rx - REST_X) / MAX_X * vh * .3; }
+    else if (useOri) { lx = pcx + (primary.ry - REST_Y) / MAX_Y * vw * .45; ly = pcy + vh * .35; }
     if (light.x < 0) { light.x = lx; light.y = ly; }
     light.x += (lx - light.x) * kT; light.y += (ly - light.y) * kT;
     var LX = Math.round(light.x), LY = Math.round(light.y);
@@ -643,7 +633,7 @@
     var ph = (t / STEP) % 1;
     if (ph > .3 && ph < .7) act = Math.max(act, .22);         // the sign is gliding into a new hue
     pulse += (act - pulse) * (act > pulse ? 1 - Math.exp(-dt * 3.5) : 1 - Math.exp(-dt / 1.6));
-    lightTiles(now, light.x, LIT_REST + (1 - LIT_REST) * pulse);
+    lightTiles(now, light.x, reduce ? LIT_STILL : LIT_REST + (1 - LIT_REST) * pulse);
     start();
   }
   function start() { if (!raf && !document.hidden) raf = requestAnimationFrame(tick); }
@@ -690,7 +680,7 @@
     document.addEventListener("mouseout", function (e) { if (!e.relatedTarget) P.on = false; });
     window.addEventListener("blur", function () { P.on = false; });
     window.addEventListener("scroll", onScroll, o);
-    window.addEventListener("resize", function () { signs.forEach(sizeGL); measure(); if (mqReduce.matches) signs.forEach(draw); kick(); }, o);
+    window.addEventListener("resize", function () { signs.forEach(sizeGL); measure(); kick(); }, o);
     window.addEventListener("hashchange", function () { tiles.lastScan = -1e9; kick(); });
     window.addEventListener("load", function () { tiles.lastScan = -1e9; kick(); });
     if (window.MutationObserver) {                           // the menu re-renders: pick up new tiles right away
@@ -712,20 +702,11 @@
     if (mqReduce.addEventListener) mqReduce.addEventListener("change", reset);
   }
 
-  function reset() {                                         // static state for reduced motion
-    if (!mqReduce.matches) { start(); return; }
-    signs.forEach(function (s, idx) {
-      s.rx = REST_X; s.ry = REST_Y; s.near = 0;
-      var c = paint(s, 0, true);
-      if (idx === 0 && c) setRoot("--sign-glow", rgb(c));
-      draw(s);
-    });
-    setRoot("--sign-intensity", ".5");
-    var r = signs[0].name.getBoundingClientRect();
-    setRoot("--light-x", Math.round(r.left + r.width / 2) + "px");
-    setRoot("--light-y", Math.round(r.top + r.height / 2) + "px");
+  function reset() {                                         // (re)start; also when the motion preference flips
+    lastColor = -1e9;
+    signs.forEach(function (s) { s.leds.forEach(function (l) { l.c = null; }); });
     measure();
-    kick();
+    start();
   }
 
   function initAll() {
