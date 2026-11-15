@@ -165,6 +165,16 @@
   .loc-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
   .loc-row .btn { padding: 12px 18px; }
 
+  /* Pickup & delivery */
+  .modes { display: grid; gap: 22px; }
+  @media (min-width: 700px) { .modes { grid-template-columns: 1fr 1fr; gap: 36px; } }
+  .mode { padding-left: 16px; border-left: 3px solid var(--ink); }
+  .mode-title { font-size: 18px !important; font-weight: 800; letter-spacing: -.01em; margin-bottom: 6px !important; }
+  .mode p { color: #3a3a3e; }
+  .free { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+          color: #fff; background: #1a7f37; padding: 3px 8px; border-radius: 10px; vertical-align: 3px; }
+  .addr-note { margin-top: 6px; font-size: 12px; color: #1a7f37; font-weight: 600; }
+
   /* How to order */
   .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; counter-reset: s; }
   @media (min-width: 700px) { .steps { grid-template-columns: repeat(3, 1fr); gap: 28px; } }
@@ -263,7 +273,7 @@
       <label>Pickup or delivery</label>
       <div class="seg" id="mode"><button type="button" data-mode="Pickup" class="on">Pickup</button><button type="button" data-mode="Delivery">Delivery</button></div>
     </div>
-    <div class="field" id="addrField" hidden><label for="addr">Delivery address</label><input id="addr" autocomplete="street-address" placeholder="Street, apt, cross street"></div>
+    <div class="field" id="addrField" hidden><label for="addr">Delivery address</label><input id="addr" autocomplete="street-address" placeholder="Street, apt, cross street"><p class="addr-note">Free delivery within 5 blocks of the store.</p></div>
     <div class="field"><label for="cname">Name</label><input id="cname" autocomplete="name" placeholder="For the order"></div>
     <div class="field"><label for="notes">Notes</label><textarea id="notes" placeholder="Salt, pepper, ketchup. No onions…"></textarea></div>
   </div>
@@ -288,6 +298,7 @@ const STORE = {
    On sale: add  was: <old price>  and it shows in red with the % off (and appears under Other > Deals).
    Combos: combo: [item ids] — the regular price is the sum of the items. */
 const KITCHEN_HOURS = "Kitchen open daily 6 AM – 10 PM";
+const DELIVERY_BLOCKS = 5;           // free delivery radius, in blocks
 const CATEGORIES = [
   { id: "kitchen", title: "Kitchen", note: KITCHEN_HOURS, cover: ["cheeseburger-deluxe"], hint: "Breakfast · Lunch · Dinner", sections: [
     { id: "breakfast", title: "Breakfast", hours: [6, 11], items: [
@@ -371,7 +382,8 @@ const CATEGORIES = [
     ]},
   ]},
   { id: "info", title: "Info", hint: "Hours · Location · Ordering", info: true, sections: [
-    { id: "contact", title: "Contact" }, { id: "hours", title: "Hours" }, { id: "location", title: "Location" }, { id: "how-to-order", title: "How to order" },
+    { id: "contact", title: "Contact" }, { id: "hours", title: "Hours" }, { id: "location", title: "Location" },
+    { id: "pickup-delivery", title: "Pickup & Delivery" }, { id: "how-to-order", title: "How to order" },
   ]},
 ];
 /* ============================================== */
@@ -405,7 +417,8 @@ let mode = "Pickup";
 document.title = STORE.name + " Menu";
 const nav = $("#nav"), subnav = $("#subnav"), menu = $("#menu");
 nav.innerHTML = CATEGORIES.map(g => `<a href="#${g.id}" data-cat="${g.id}">${g.title}</a>`).join("");
-$("#siteFoot").innerHTML = `${STORE.name} · ${STORE.address}<br>Order on <a href="https://wa.me/${STORE.whatsapp}" target="_blank" rel="noopener">WhatsApp</a>`;
+$(".addr-note").textContent = `Free delivery within ${DELIVERY_BLOCKS} blocks of the store.`;
+$("#siteFoot").innerHTML =`${STORE.name} · ${STORE.address}<br>Order on <a href="https://wa.me/${STORE.whatsapp}" target="_blank" rel="noopener">WhatsApp</a>`;
 
 const itemHTML = i => `
   <article class="item${i.kitchen ? " kitchen" : ""}${i.combo ? " combo" : ""}${i.pct ? " deal" : ""}" data-id="${i.id}">
@@ -480,8 +493,21 @@ const infoHTML = () => {
       <p class="addr">${STORE.name}<br>${STORE.address}</p>
       <div class="map"><iframe src="${mapEmbed}" title="Map to ${STORE.name}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>
       <div class="loc-row">
-        <span class="muted">Pickup at the counter or delivery nearby.</span>
+        <span class="muted">Pickup at the counter · Free delivery within ${DELIVERY_BLOCKS} blocks</span>
         <a class="btn ghost" href="${mapsUrl}" target="_blank" rel="noopener">Get directions</a>
+      </div>
+    </section>
+
+    <section id="pickup-delivery" class="card span-12"><h2>Pickup &amp; Delivery</h2>
+      <div class="modes">
+        <div class="mode">
+          <p class="mode-title">Pickup</p>
+          <p>Order ahead on WhatsApp and grab it at the counter. We'll message you when it's ready.</p>
+        </div>
+        <div class="mode">
+          <p class="mode-title">Delivery <span class="free">Free</span></p>
+          <p><b>Free delivery within a ${DELIVERY_BLOCKS}-block radius</b> of the store. Choose <b>Delivery</b> in your order and add your address.</p>
+        </div>
       </div>
     </section>
 
