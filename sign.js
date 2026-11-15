@@ -12,8 +12,17 @@
   var DEG = Math.PI / 180;
   /* two-point perspective: the camera sits at the mid-height of the two-line block, no pitch, no roll,
      so verticals stay vertical; the sign only turns about its vertical axis */
-  var REST_Y = -30;                       // resting yaw (deg, + faces right): right end near, left end receding
-  var MAX_Y = 12;                         // extra yaw from pointer / device (deg)
+  var REST_Y = 0;                         // resting yaw (deg): faces straight forward
+  var FOCAL_MM = 5;                       // lens: focal length vs. a 36 mm-wide frame around the sign (5 mm = ultra-wide,
+                                          // strongly exaggerated depth; 50 mm ≈ natural). Flat faces stay undistorted.
+  var MAX_Y = 4;                          // limit of the extra yaw from pointer / touch / device (deg, each way;
+                                          // small, because the ultra-wide lens exaggerates every turn)
+  /* Relative control, no fixed origin: each pointer / finger / phone movement nudges the yaw by its own
+     delta. The yaw stops at ±MAX_Y; moving back the other way from wherever you are turns it straight back. */
+  var GAIN_PX = .022;                     // deg per px of mouse / finger movement
+  var GAIN_TILT = .35;                    // deg per degree of phone tilt (gamma)
+  var Y = { off: 0, lx: null, lg: null }; // accumulated yaw offset; last touch x; last gamma
+  function nudge(d) { Y.off = clamp(Y.off + d, -MAX_Y, MAX_Y); start(); }
   var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
   var STEP = 3.6;                         // seconds per palette colour
   var COLOR_MS = 66;                      // colour updates ~15 fps
@@ -370,11 +379,14 @@
     g.renderer.setPixelRatio(dpr);
     g.renderer.setSize(W, half * 2, false);
     if (!g.lines) layout(s);
-    /* camera straight ahead at eye level; close enough that the near end is clearly taller than the far end.
+    /* camera straight ahead at eye level, centred on the block. Its distance comes from the focal length:
+       the frame (block + a margin) is treated as a 36 mm-wide sensor, so d = frameHalf × FOCAL_MM / 18.
+       Short lens → very close camera → the letter sides fan out strongly toward the centre vanishing point.
        The block is nudged sideways so that, at the resting yaw, its two ends are equally far from the centre. */
-    var th = REST_Y * DEG, hw = g.blockW / 2, d = g.blockW * CAM_K;
+    var th = REST_Y * DEG, hw = g.blockW / 2, d = Math.max(.6, (hw + .6) * FOCAL_MM / 18);
     var a = hw * Math.cos(th), zp = -hw * Math.sin(th), xo = -a * zp / d;
-    var halfW = (a + xo) * d / (d - zp) + .22;                               // projected half width at rest (em)
+    var zf = DEPTH / 2;                                                        // front faces sit this far in front of z = 0
+    var halfW = (a + xo) * d / (d - zp - zf) + .22;                          // projected half width at rest (em)
     var fit = Math.min(1, (W - 24) / 2 / fs / halfW);                        // never wider than the page
     g.camera.aspect = W / (half * 2);
     g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * d * fit)) / DEG;     // 1 world unit = 1em on screen at z = 0
@@ -590,16 +602,12 @@
     for (var idx = 0; idx < signs.length; idx++) {
       var s = signs[idx], r = s.name.getBoundingClientRect();
       var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var ty = REST_Y, near = 0;
+      var ty = REST_Y + Y.off, near = 0;                     // yaw only (verticals stay vertical); offset is relative
       if (P.on) {
-        var dx = clamp((P.x - cx) / (vw / 2), -1, 1);
-        ty = REST_Y + dx * MAX_Y;                            // turns toward the pointer, about the vertical axis only
         var ex = Math.max(r.left - P.x, 0, P.x - r.right), ey = Math.max(r.top - P.y, 0, P.y - r.bottom);
         near = clamp(1 - Math.sqrt(ex * ex + ey * ey) / 260, 0, 1);
-      } else if (useOri) {
-        ty = REST_Y + O.dx * MAX_Y;                          // phone tilted left / right
-      } else if (!reduce && (noHover || !P.mouse)) {         // idle sway
-        ty = REST_Y + Math.sin(t * .5 + idx) * 4;
+      } else if (!useOri && !reduce && (noHover || !P.mouse)) {   // idle sway until someone interacts
+        ty += Math.sin(t * .5 + idx) * 2.5;
       }
       var pry = s.ry, pn = s.near;
       s.ry += (ty - s.ry) * kT;
@@ -641,7 +649,10 @@
   /* ---------- input ---------- */
   function onTouch(e) {
     var tp = e.touches && e.touches[0];
-    if (tp) { P.x = tp.clientX; P.y = tp.clientY; P.on = true; }
+    if (!tp) return;
+    if (e.type === "touchmove" && Y.lx != null) nudge((tp.clientX - Y.lx) * GAIN_PX);
+    Y.lx = tp.clientX;
+    P.x = tp.clientX; P.y = tp.clientY; P.on = true;
   }
   function onOrient(e) {
     if (e.gamma == null || e.beta == null) return;
@@ -656,6 +667,11 @@
     O.bb += (b - O.bb) * k;
     O.dx = clamp((g - O.bg) / 20, -1, 1);
     O.dy = clamp((b - O.bb) / 20, -1, 1);
+    if (Y.lg != null) {                                      // relative: turning the phone nudges the yaw
+      var dg = g - Y.lg;
+      if (Math.abs(dg) < 30) nudge(dg * GAIN_TILT);           // ignore jumps (e.g. gamma wrapping at ±90°)
+    }
+    Y.lg = g;
     O.t = now;
     start();
   }
@@ -671,8 +687,11 @@
     var o = { passive: true };
     window.addEventListener("pointermove", function (e) {
       if (e.pointerType === "touch") return;
+      var mx = typeof e.movementX === "number" ? e.movementX : (P.mouse ? e.clientX - P.x : 0);
+      if (P.mouse && Math.abs(mx) < 200) nudge(mx * GAIN_PX);   // relative: the movement, not the position
       P.x = e.clientX; P.y = e.clientY; P.on = true; P.mouse = true;
     }, o);
+    window.addEventListener("touchstart", function () { Y.lx = null; }, o);
     window.addEventListener("touchstart", onTouch, o);
     window.addEventListener("touchmove", onTouch, o);
     window.addEventListener("touchend", function (e) { if (!e.touches.length) P.on = false; }, o);
