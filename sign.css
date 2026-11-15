@@ -26,13 +26,16 @@
      --sign-intensity  0–1, rises when the pointer is near the sign
      --light-x/-y      light position in viewport px (pointer / device tilt, else sign centre)
    and adds  body.sign-lit  (ambient light on .tile, main section h2, .price),
-   .bodega-sign.is-compact  (after ~60px of scroll),  per-tile --lx / --ly,
+   .bodega-sign.is-compact  (after ~60px of scroll),
+   per .tile:  --lit (0–1: falls off with distance from the sign, lifts when the light changes and
+   dissolves to a faint rest), --ang (gradient angle pointing away from the sign), --rx / --ry, --cx;
+   and .bs-lit / .bs-rim / .bs-cast overlays next to each tile image,
    .bodega-sign.is-3d  (WebGL letters are showing).
    ===================================================================== */
 
 /* ---------- wrapper: sticky, clean white backdrop ---------- */
 .bodega-sign {
-  --bs-fs: min(60px, calc((100vw - 48px) / 11.7));   /* 1em of the letters (cap height = .69em) */
+  --bs-fs: min(60px, calc((100vw - 48px) / 12.6));   /* 1em of the letters (cap height = .69em) */
   --bs-nh: calc(var(--bs-fs) * .76);                  /* letters block height (one line) */
   --bs-pad-t: 28px;
   --bs-pad-b: 20px;
@@ -51,9 +54,7 @@
   margin: 0;
   padding: 0;
   text-align: center;
-  background: rgba(255, 255, 255, .94);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  backdrop-filter: blur(10px) saturate(1.1);
+  background: #fff;                                    /* clean page white, no blur */
   overflow-x: clip;                                    /* tilt never causes horizontal scroll */
   overflow-y: visible;                                 /* wall glow may spill below */
   transition: height .5s var(--bs-ease);
@@ -177,15 +178,15 @@ body.sign-lit .tile::after {
   inset: 0;
   z-index: 4;
   pointer-events: none;
-  background: radial-gradient(circle 300px at var(--lx, 50%) var(--ly, -30%),
-    rgb(255 255 255 / .3) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .085) 30%,
-    rgb(var(--sign-glow, 255 104 64) / 0) 72%);
-  opacity: calc((.45 + .55 * var(--sign-intensity, .5)) * (.35 + .65 * var(--lit, .6)));
+  background: linear-gradient(var(--ang, 180deg),      /* faint wash falling from the sign's direction */
+    rgb(255 255 255 / .16) 0%,
+    rgb(var(--sign-glow, 255 104 64) / .07) 22%,
+    rgb(var(--sign-glow, 255 104 64) / 0) 62%);
+  opacity: var(--lit, .3);
 }
 
 /* light landing on the food itself (overlays added by sign.js next to each tile image):
-   --lit 0–1 falls off with the tile's distance from the sign; --ox/--oy point at the sign */
+   --lit 0–1 falls off with the tile's distance from the sign; --ang points away from the sign */
 body.sign-lit .tile { isolation: isolate; }
 .tile .bs-lit,
 .tile .bs-rim,
@@ -200,16 +201,18 @@ body.sign-lit .tile { isolation: isolate; }
   mask-size: var(--ms, contain);
   -webkit-mask-position: var(--mpx, 50%) var(--mpy, 50%);
   mask-position: var(--mpx, 50%) var(--mpy, 50%);
+  background-repeat: no-repeat;                        /* gradient box = the object's alpha bounds (set by sign.js) */
   transition: transform .4s ease;                      /* follows the page's hover zoom on the image */
 }
-.tile .bs-lit {                                        /* colour cast, shaped by the object, dissipating across it */
-  background: radial-gradient(circle farthest-corner at var(--ox, 50%) var(--oy, -10%),
-    rgb(255 255 255 / .7) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .8) 16%,
-    rgb(var(--sign-glow, 255 104 64) / .34) 42%,
-    rgb(var(--sign-glow, 255 104 64) / 0) 78%);
+.tile .bs-lit {                                        /* gentle directional cast: lit edge faces the sign, dissolves across the object */
+  background-image: linear-gradient(var(--ang, 180deg),
+    rgb(255 255 255 / .6) 0%,
+    rgb(var(--sign-glow, 255 104 64) / .7) 14%,
+    rgb(var(--sign-glow, 255 104 64) / .3) 40%,
+    rgb(var(--sign-glow, 255 104 64) / .08) 66%,
+    rgb(var(--sign-glow, 255 104 64) / 0) 88%);
   mix-blend-mode: soft-light;
-  opacity: calc(.12 + .88 * var(--lit, .5));
+  opacity: calc(.55 * var(--lit, .3));
 }
 .tile .bs-rim {                                        /* thin lit edge on the side facing the sign */
   -webkit-mask-image: var(--m), var(--m);
@@ -218,23 +221,22 @@ body.sign-lit .tile { isolation: isolate; }
   mask-position: var(--mpx, 50%) var(--mpy, 50%), calc(var(--mpx, 50%) + var(--rx, 0px)) calc(var(--mpy, 50%) + var(--ry, 2.5px));
   -webkit-mask-composite: source-out;
   mask-composite: subtract;
-  background: radial-gradient(circle farthest-corner at var(--ox, 50%) var(--oy, -10%),
-    rgb(255 255 255 / .95) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .9) 30%,
-    rgb(var(--sign-glow, 255 104 64) / 0) 80%);
+  background-image: linear-gradient(var(--ang, 180deg),
+    rgb(255 255 255 / .9) 0%,
+    rgb(var(--sign-glow, 255 104 64) / .8) 30%,
+    rgb(var(--sign-glow, 255 104 64) / 0) 75%);
   mix-blend-mode: screen;
-  opacity: calc(.75 * var(--lit, .5));
+  opacity: calc(.4 * var(--lit, .3));
 }
 .tile .bs-cast {                                       /* soft tinted shadow on the tile floor, away from the light */
   z-index: -1;
   border-radius: 50%;
-  background: radial-gradient(closest-side,
-    rgb(var(--sign-glow, 255 104 64) / .34) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .13) 55%,
-    rgb(var(--sign-glow, 255 104 64) / 0) 100%);
+  background:
+    radial-gradient(closest-side, rgb(var(--sign-glow, 255 104 64) / .16) 0%, rgb(var(--sign-glow, 255 104 64) / .06) 55%, rgb(var(--sign-glow, 255 104 64) / 0) 100%),
+    radial-gradient(closest-side, rgb(40 40 52 / .15) 0%, rgb(40 40 52 / .05) 60%, rgb(40 40 52 / 0) 100%);
   mix-blend-mode: multiply;
   transform: translateX(var(--cx, 0px));
-  opacity: calc(.25 + .75 * var(--lit, .5));
+  opacity: calc(.3 + .5 * var(--lit, .3));
 }
 .tile:hover > .bs-lit,
 .tile:hover > .bs-rim { transform: scale(1.04); }

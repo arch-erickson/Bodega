@@ -21,7 +21,7 @@
 
   /* letter construction, in em (cap height = .688em) */
   var DEPTH = .17;                        // extrusion ≈ 25% of the cap height
-  var TRACK = .03, LINE = .84, FOV = 30;
+  var TRACK = .03, LINE = .84, FOV = 30, CAM_K = 2.3;
   var WALL_Z = -.5;                       // the "wall" the glow / shadow lands on, behind the letters
   var MASK_R = 48, MASK_PAD = .95;        // glow mask: px per em, padding in em
 
@@ -36,6 +36,8 @@
   var light = { x: -1, y: -1 };
   var tiles = { seen: new WeakSet(), vis: new Set(), dirty: new Set(), io: null, ro: null, lastScan: -1e9, pass: 0 };
   var tileList = [], tileRects = [];
+  var pulse = 1, scrollT = -1e9;          // light "energy": bumps on scroll / tilt / hue shift, then dissolves
+  var LIT_REST = .16, LIT_STILL = .5;     // resting level of the light on products; level when motion is reduced
   var T = null, FONT = null;              // three.js module + glyph data, once loaded
   var tmpA = [0, 0, 0], tmpB = [0, 0, 0];
 
@@ -199,7 +201,7 @@
     ctx.globalCompositeOperation = "lighter";
     ctx.shadowOffsetX = OFF;                                 // only the blurred "shadow" lands on the canvas
     ctx.fillStyle = "#fff";
-    ctx.shadowColor = "#f00"; ctx.shadowBlur = R * .6; ctx.fill(path);
+    ctx.shadowColor = "#f00"; ctx.shadowBlur = R * .5; ctx.fill(path);
     ctx.shadowColor = "#0f0"; ctx.shadowBlur = R * .09; ctx.fill(path);
     var tex = new T.CanvasTexture(cv);
     tex.generateMipmaps = false;
@@ -313,7 +315,7 @@
       var mFace = new T.ShaderMaterial({ vertexShader: VERT, fragmentShader: FACE_FRAG, toneMapped: false,
         uniforms: { uC1: uC1, uC2: uC2, uSheen: { value: .5 }, uB: { value: new T.Vector4(bb.min.x, bb.max.x - bb.min.x, 0, FONT.capHeight / FONT.unitsPerEm) } } });
       var mWall = new T.ShaderMaterial({ vertexShader: VERT, fragmentShader: WALL_FRAG, transparent: true, depthWrite: false, toneMapped: false,
-        uniforms: { uMap: { value: mask.tex }, uC1: uC1, uC2: uC2, uGlow: uGlow, uShadow: { value: .2 }, uOff: { value: new T.Vector2(0, .17 / mask.h) } } });
+        uniforms: { uMap: { value: mask.tex }, uC1: uC1, uC2: uC2, uGlow: uGlow, uShadow: { value: .15 }, uOff: { value: new T.Vector2(0, .17 / mask.h) } } });
       var mBloom = new T.ShaderMaterial({ vertexShader: VERT, fragmentShader: BLOOM_FRAG, transparent: true, depthWrite: false, toneMapped: false,
         uniforms: { uMap: { value: mask.tex }, uC1: uC1, uC2: uC2, uGlow: { value: .5 } } });
       var grp = new T.Group();
@@ -369,18 +371,21 @@
     g.canvas.style.top = (yc - half) + "px";
     g.renderer.setPixelRatio(dpr);
     g.renderer.setSize(W, half * 2, false);
-    g.camera.aspect = W / (half * 2);
-    g.camera.position.z = (half * 2 / fs) / (2 * Math.tan(FOV * DEG / 2));   // 1 world unit = 1em on screen
-    g.camera.updateProjectionMatrix();
     if (lines !== g.lines) layout(s, lines);
-    g.rootG.scale.setScalar(Math.min(1, (W - 28) / (g.blockW * fs)));       // never wider than the page
+    var fit = Math.min(1, (W - 28) / (g.blockW * 1.04 * fs));              // never wider than the page
+    var dist = Math.max(14, g.blockW * fit * CAM_K);                        // far enough that the ends don't balloon
+    g.camera.aspect = W / (half * 2);
+    g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * dist)) / DEG;       // 1 world unit = 1em on screen at z = 0
+    g.camera.position.z = dist;
+    g.camera.updateProjectionMatrix();
+    g.rootG.scale.setScalar(fit);
     g.dirty = true;
   }
 
   function draw(s) {
     var g = s.gl;
     if (!g) return;
-    var yaw = s.ry * DEG, pitch = s.rx * DEG, glow = .34 + .14 * s.near;
+    var yaw = s.ry * DEG, pitch = s.rx * DEG, glow = .21 + .12 * s.near;
     g.tilt.rotation.set(pitch, yaw, 0);
     var sx = -Math.sin(yaw) * .32, sy = Math.sin(pitch) * .32 - .03;       // glow / shadow slide with the tilt
     for (var i = 0; i < g.words.length; i++) {
@@ -429,6 +434,7 @@
   }
   function onScroll() {
     var y = window.pageYOffset || root.scrollTop, changed = false;
+    scrollT = performance.now();
     signs.forEach(function (s) {
       var c = s.compact ? y > COMPACT_OFF : y > COMPACT_ON;
       if (c !== s.compact) { s.compact = c; s.root.classList.toggle("is-compact", c); changed = true; }
@@ -450,10 +456,31 @@
 
   /* ---------- sign light landing on the food ----------
      Every product image in a visible tile gets three aria-hidden siblings:
-       .bs-lit   colour cast masked by the image's own alpha (soft-light), brightest on the side facing the sign
+       .bs-lit   colour cast masked by the image's own alpha (soft-light): a directional gradient that starts
+                 on the edge facing the sign and dissolves across the object
        .bs-rim   thin highlight on the facing edge (image mask minus the same mask nudged away from the light)
        .bs-cast  soft tinted shadow on the tile floor, on the side away from the light
-     Strength (--lit) falls off with the tile's distance from the sign (inverse-square-ish). */
+     Strength (--lit) falls off with the tile's distance from the sign (inverse-square-ish) and with time:
+     it lifts a little when the light changes (scroll, tilt, a new hue) and eases back to a faint rest. */
+  var alphaBoxes = {}, alphaCv = null;
+  function alphaBox(img) {                                   // where the object sits inside its (transparent) image, 0–1
+    var k = img.currentSrc || img.src, b = alphaBoxes[k];
+    if (b) return b;
+    b = alphaBoxes[k] = { x0: 0, y0: 0, x1: 1, y1: 1 };
+    try {
+      var N = 48;
+      if (!alphaCv) { alphaCv = document.createElement("canvas"); alphaCv.width = alphaCv.height = N; }
+      var ctx = alphaCv.getContext("2d", { willReadFrequently: true });
+      ctx.clearRect(0, 0, N, N);
+      ctx.drawImage(img, 0, 0, N, N);
+      var d = ctx.getImageData(0, 0, N, N).data, x0 = N, y0 = N, x1 = -1, y1 = -1;
+      for (var y = 0; y < N; y++) for (var x = 0; x < N; x++) {
+        if (d[(y * N + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+      if (x1 >= x0 && y1 >= y0) { b.x0 = x0 / N; b.y0 = y0 / N; b.x1 = (x1 + 1) / N; b.y1 = (y1 + 1) / N; }
+    } catch (err) { /* cross-origin image: use the whole box */ }
+    return b;
+  }
   function litImg(img) {                                     // create the overlays once the image has pixels
     if (img._lit) return;
     if (!img.complete || !img.naturalWidth) {
@@ -468,7 +495,7 @@
     var rim = hidden(el("span", "bs-rim", img.parentNode, img.nextSibling));
     var lit = hidden(el("span", "bs-lit", img.parentNode, img.nextSibling));
     lit.style.setProperty("--m", m); rim.style.setProperty("--m", m);
-    img._lit = { lit: lit, rim: rim, cast: cast, box: null };
+    img._lit = { lit: lit, rim: rim, cast: cast, box: null, bb: alphaBox(img), nw: img.naturalWidth, nh: img.naturalHeight };
   }
   function readTile(tl) {                                    // layout reads only
     var imgs = tl.querySelectorAll("img"), out = [];
@@ -486,18 +513,28 @@
       var b = boxes[i], o = b.o, k = [b.l, b.t, b.w, b.h, b.z, b.px, b.py].join("|");
       if (o.box === k) continue;
       o.box = k;
+      /* the object's own rectangle (alpha bounds) inside the img box, honouring object-fit / object-position */
+      var sc = b.fit === "cover" ? Math.max(b.w / o.nw, b.h / o.nh) : Math.min(b.w / o.nw, b.h / o.nh);
+      var iw = o.nw * sc, ih = o.nh * sc;
+      var fx = /%$/.test(b.px) ? parseFloat(b.px) / 100 : .5, fy = /%$/.test(b.py) ? parseFloat(b.py) / 100 : .5;
+      var ix = (b.w - iw) * fx, iy = (b.h - ih) * fy;
+      var bx = ix + o.bb.x0 * iw, by = iy + o.bb.y0 * ih, bw = (o.bb.x1 - o.bb.x0) * iw, bh = (o.bb.y1 - o.bb.y0) * ih;
+      var ch = Math.max(10, Math.min(bw * .2, bh * .36));
       for (var j = 0; j < 2; j++) {
         var e = j ? o.rim : o.lit;
         e.style.left = b.l + "px"; e.style.top = b.t + "px"; e.style.width = b.w + "px"; e.style.height = b.h + "px";
         e.style.zIndex = b.z === "auto" ? "" : b.z;
         e.style.setProperty("--mpx", b.px); e.style.setProperty("--mpy", b.py); e.style.setProperty("--ms", b.fit);
+        e.style.backgroundSize = bw.toFixed(1) + "px " + bh.toFixed(1) + "px";   // the light gradient spans the object itself
+        e.style.backgroundPosition = bx.toFixed(1) + "px " + by.toFixed(1) + "px";
       }
-      o.cast.style.left = (b.l + b.w * .06) + "px"; o.cast.style.width = (b.w * .88) + "px";
-      o.cast.style.top = (b.t + b.h * .8) + "px"; o.cast.style.height = Math.max(14, b.h * .3) + "px";
+      o.cast.style.left = (b.l + bx + bw * .03).toFixed(1) + "px"; o.cast.style.width = (bw * .94).toFixed(1) + "px";
+      o.cast.style.top = (b.t + by + bh - ch * .6).toFixed(1) + "px"; o.cast.style.height = ch.toFixed(1) + "px";
     }
   }
-  /* reads (rects + dirty boxes), then writes (per-tile vars). lx/ly: light in viewport px; follow: pointer highlight on */
-  function lightTiles(now, lx, ly, follow) {
+  /* reads (rects + dirty boxes), then writes (per-tile vars). The light is the sign itself: it comes from
+     the sign's position above each tile; lx (pointer / tilt) only nudges it sideways a little. */
+  function lightTiles(now, lx, gain) {
     scanTiles(now);
     var i, tl, n = 0, pending = [];
     var sr = signs[0].root.getBoundingClientRect();
@@ -517,29 +554,24 @@
       for (i = 0; i < pending.length; i++) pending[i] = readTile(pending[i]);   // all reads…
       for (i = 0; i < pending.length; i++) writeTile(pending[i]);               // …then all writes
     }
-    var scx = sr.left + sr.width / 2, sx = scx + (lx - scx) * .35, sy = sr.bottom - 10;
+    var scx = sr.left + sr.width / 2, sx = scx + clamp((lx - scx) * .1, -60, 60), sy = sr.bottom - 10;
     for (i = 0; i < n; i++) {
       tl = tileList[i];
       var r = tileRects[i], dx = sx - (r.left + r.width / 2), dy = sy - (r.top + r.height / 2);
       var d = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / d, uy = dy / d;
-      var lit = clamp(1.25 / (1 + (d / 340) * (d / 340)), .05, 1);
+      var lit = clamp(1.25 / (1 + (d / 340) * (d / 340)), .05, 1) * gain;
       setVar(tl, "--lit", lit.toFixed(2));
-      setVar(tl, "--ox", Math.round(50 + ux * 60) + "%");
-      setVar(tl, "--oy", Math.round(50 + uy * 60) + "%");
+      setVar(tl, "--ang", Math.round(Math.atan2(-ux, uy) / DEG) + "deg");   // CSS gradient angle: away from the sign
       setVar(tl, "--rx", (-ux * 2.6).toFixed(1) + "px");
       setVar(tl, "--ry", (-uy * 2.6).toFixed(1) + "px");
       setVar(tl, "--cx", Math.round(-ux * 12) + "px");
-      if (follow) {
-        setVar(tl, "--lx", (Math.round(lx) - Math.round(r.left)) + "px");
-        setVar(tl, "--ly", (Math.round(ly) - Math.round(r.top)) + "px");
-      }
     }
   }
   function staticPass() {                                    // reduced motion: same light, no pointer tracking
     tiles.pass = 0;
     if (!signs.length || !mqReduce.matches) return;
     var r = signs[0].root.getBoundingClientRect();
-    lightTiles(performance.now(), r.left + r.width / 2, r.bottom, false);
+    lightTiles(performance.now(), r.left + r.width / 2, LIT_STILL);
   }
   function kick() {                                          // something about the tiles changed
     if (mqReduce.matches) { if (!tiles.pass) tiles.pass = requestAnimationFrame(staticPass); }
@@ -555,7 +587,7 @@
     var kT = 1 - Math.exp(-dt * 6), kN = 1 - Math.exp(-dt * 5);
     var vw = window.innerWidth, vh = window.innerHeight, t = now / 1000;
     var useOri = !P.on && now - O.t < 1500;
-    var primary = signs[0], pcx = 0, pcy = 0;
+    var primary = signs[0], pcx = 0, pcy = 0, tiltSpeed = 0;
 
     /* reads */
     var signH = primary.root.getBoundingClientRect().height;
@@ -584,6 +616,7 @@
       s.near += (near - s.near) * kN;
       s.inten = .45 + .55 * s.near;
       var moved = Math.abs(s.rx - prx) + Math.abs(s.ry - pry) > .002 || Math.abs(s.near - pn) > .002;
+      if (idx === 0) tiltSpeed = (Math.abs(s.rx - prx) + Math.abs(s.ry - pry)) / dt;
 
       if (colorTick) {
         var c = paint(s, t, false);
@@ -604,7 +637,13 @@
     setRoot("--sign-intensity", primary.inten.toFixed(2));
     setRoot("--light-x", LX + "px");
     setRoot("--light-y", LY + "px");
-    lightTiles(now, light.x, light.y, true);
+    /* the light on the products dissolves over time: lifts when something changes, eases to a faint rest */
+    var act = now - scrollT < 140 ? 1 : 0;
+    if ((P.on || useOri) && tiltSpeed > 5) act = Math.max(act, Math.min(1, tiltSpeed / 22));
+    var ph = (t / STEP) % 1;
+    if (ph > .3 && ph < .7) act = Math.max(act, .22);         // the sign is gliding into a new hue
+    pulse += (act - pulse) * (act > pulse ? 1 - Math.exp(-dt * 3.5) : 1 - Math.exp(-dt / 1.6));
+    lightTiles(now, light.x, LIT_REST + (1 - LIT_REST) * pulse);
     start();
   }
   function start() { if (!raf && !document.hidden) raf = requestAnimationFrame(tick); }
@@ -685,7 +724,6 @@
     var r = signs[0].name.getBoundingClientRect();
     setRoot("--light-x", Math.round(r.left + r.width / 2) + "px");
     setRoot("--light-y", Math.round(r.top + r.height / 2) + "px");
-    tiles.vis.forEach(function (tl) { tl.style.removeProperty("--lx"); tl.style.removeProperty("--ly"); tl["_--lx"] = tl["_--ly"] = null; });
     measure();
     kick();
   }
