@@ -1,46 +1,49 @@
 /* =====================================================================
-   Gonzales Bodega — 3D lit lightbox sign (sticky, compacts on scroll)
+   Gonzales Bodega — 3D storefront lightbox sign (sticky, compacts on scroll)
    ---------------------------------------------------------------------
-   PASTE THIS MARKUP in place of the page's existing <header>…</header>
-   (it must be a direct child of <body> so position: sticky can follow
-   the whole page):
+   MARKUP (a direct child of <body>, so position: sticky follows the page):
 
-<header class="bodega-sign" data-glow="255 104 64">
+<header class="bodega-sign" title="Back to menu home">
   <div class="bs-stage">
-    <div class="bs-halo" aria-hidden="true"></div>
     <div class="bs-box">
-      <div class="bs-front">
-        <div class="bs-bulbs" aria-hidden="true"></div>
-        <div class="bs-panel">
+      <div class="bs-face">
+        <div class="bs-copy"><div class="bs-copy-in">
           <h1 class="bs-name" id="storeName">Gonzales Bodega</h1>
-          <p class="bs-sub" id="storeLine">Deli · Grocery · 24 Hrs</p>
-        </div>
+          <div class="bs-row">
+            <p class="bs-sub" id="storeLine">Deli • Grocery • 24 Hrs</p>
+            <span class="bs-pill" aria-hidden="true">Order on WhatsApp</span>
+          </div>
+        </div></div>
         <div class="bs-glare" aria-hidden="true"></div>
       </div>
     </div>
   </div>
 </header>
 
-   Then load:  <link rel="stylesheet" href="sign.css">
-               <script src="sign.js" defer></script>
+   Fonts: add  family=Archivo+Black  to the Google Fonts link.
+   Load:  <link rel="stylesheet" href="sign.css">  +  <script src="sign.js" defer></script>
+   sign.js builds the cabinet sides + orange awning faces itself (all aria-hidden).
 
    sign.js publishes on :root
-     --sign-h          rendered sign height in px (use: nav { top: var(--sign-h, 0px) })
-     --sign-glow       light colour as an "R G B" triplet (use: rgb(var(--sign-glow) / .2))
-     --sign-intensity  0–1, rises near the pointer, dips with the neon flicker
-     --light-x/-y      light position in viewport px (pointer, or sign centre when idle)
+     --sign-h          rendered sign height in px (nav { top: var(--sign-h, 0px) })
+     --sign-glow       current letter colour, "R G B" triplet, drifts with the sign's colour cycle
+                       (use: rgb(var(--sign-glow) / .2))
+     --sign-intensity  0–1, rises when the pointer is near the sign
+     --light-x/-y      light position in viewport px (pointer / device tilt, else sign centre)
    and adds  body.sign-lit  (ambient light on .tile, main section h2, .price),
    .bodega-sign.is-compact  (after ~60px of scroll),  per-tile --lx / --ly.
    ===================================================================== */
 
-/* ---------- wrapper: sticky, white frosted backdrop ---------- */
+/* ---------- wrapper: sticky, clean white backdrop ---------- */
 .bodega-sign {
-  --bs-w: min(100vw - 32px, 660px);                 /* face width */
-  --bs-h: max(104px, calc(var(--bs-w) * .275));     /* face height: ~181px desktop, 104px phone */
-  --bs-band: calc(var(--bs-w) * .05);               /* red bulb frame */
-  --bs-radius: calc(var(--bs-w) * .034);
-  --bs-depth: calc(var(--bs-w) * .042);             /* cabinet thickness */
-  --bs-pad-t: 10px;
+  --bs-w: min(100vw - 32px, 600px);                       /* sign width */
+  --bs-aw: max(12px, calc(var(--bs-w) * .042));           /* orange awning band */
+  --bs-h: max(76px, calc(var(--bs-w) * .19));             /* black box face */
+  --bs-t: calc(var(--bs-aw) + var(--bs-h));               /* total front height: ~139px desktop, ~90px phone */
+  --bs-lw: calc(var(--bs-w) * .03);                       /* awning wrap down the left end */
+  --bs-d: calc(var(--bs-w) * .05);                        /* box depth */
+  --bs-f: calc(var(--bs-w) * .014);                       /* awning overhang in front of the box */
+  --bs-pad-t: 18px;
   --bs-pad-b: 16px;
   --bs-scale: 1;
   --bs-ease: cubic-bezier(.2, .75, .2, 1);
@@ -51,20 +54,21 @@
   display: block;
   box-sizing: border-box;
   width: 100%;
-  height: calc(var(--bs-pad-t) + var(--bs-h) * var(--bs-scale) + var(--bs-pad-b));
+  height: calc(var(--bs-pad-t) + var(--bs-t) * var(--bs-scale) + var(--bs-pad-b));
   margin: 0;
   padding: 0;
   text-align: center;
-  background: rgba(255, 255, 255, .93);
-  -webkit-backdrop-filter: blur(10px) saturate(1.15);
-  backdrop-filter: blur(10px) saturate(1.15);
-  overflow-x: clip;                                  /* tilt never causes horizontal scroll */
+  background: rgba(255, 255, 255, .94);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+  overflow-x: clip;                                        /* tilt never causes horizontal scroll */
   overflow-y: visible;
   transition: height .5s var(--bs-ease);
 }
-.bodega-sign.is-compact { --bs-scale: .42; --bs-pad-b: 8px; }
+.bodega-sign.is-compact { --bs-scale: .5; --bs-pad-t: 10px; --bs-pad-b: 8px; }
 @media (max-width: 600px) {
-  .bodega-sign.is-compact { --bs-scale: .6; }
+  .bodega-sign { --bs-pad-t: 14px; --bs-pad-b: 14px; }
+  .bodega-sign.is-compact { --bs-scale: .66; --bs-pad-t: 8px; --bs-pad-b: 8px; }
 }
 
 /* ---------- stage: perspective + compact scaling ---------- */
@@ -73,25 +77,12 @@
   top: var(--bs-pad-t);
   left: calc(50% - var(--bs-w) / 2);
   width: var(--bs-w);
-  height: var(--bs-h);
-  perspective: calc(var(--bs-w) * 1.8);
-  perspective-origin: 50% 115%;                      /* we look up at it a little: a hint of underside */
+  height: var(--bs-t);
+  perspective: calc(var(--bs-w) * 1.6);
+  perspective-origin: 50% -25%;                            /* seen from slightly above: awning top + depth */
   transform: scale(var(--bs-scale));
   transform-origin: 50% 0;
-  transition: transform .5s var(--bs-ease);
-}
-
-/* warm light spilling around the box onto the page */
-.bodega-sign .bs-halo {
-  position: absolute;
-  left: -8%;
-  top: -35%;
-  width: 116%;
-  height: 185%;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(closest-side, rgba(255, 96, 60, .30), rgba(255, 120, 60, .12) 55%, rgba(255, 120, 60, 0));
-  opacity: .5;
+  transition: transform .5s var(--bs-ease), top .5s var(--bs-ease);
 }
 
 /* ---------- the 3D cabinet ---------- */
@@ -99,94 +90,118 @@
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
-  transform-origin: 50% 50% calc(var(--bs-depth) * -.5);
+  transform-origin: 50% 50% calc(var(--bs-d) * -.5);
   will-change: transform;
 }
-/* extrusion slices behind the face (generated by sign.js) */
-.bodega-sign .bs-layer {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--bs-radius);
-  background: #4a070b;
-  transform: translateZ(calc(var(--bs-depth) * var(--k) / -10));
-}
-.bodega-sign .bs-layer.bs-back {
-  box-shadow: 0 calc(var(--bs-h) * .12) calc(var(--bs-h) * .2) calc(var(--bs-h) * -.06) rgba(70, 0, 8, .45);
-}
+.bodega-sign .bs-box > * { position: absolute; }
 
-/* ---------- front face: red frame + dark neon panel ---------- */
-.bodega-sign .bs-front {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--bs-radius);
+/* black box: front face (holds the copy) */
+.bodega-sign .bs-face {
+  left: 0;
+  top: var(--bs-aw);
+  width: 100%;
+  height: var(--bs-h);
   overflow: hidden;
-  background: linear-gradient(180deg, #d8202a 0%, #ad131c 46%, #820b12 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .45),
-    inset 0 0 0 1.5px rgba(60, 0, 4, .55),
-    inset 0 -4px 8px rgba(40, 0, 3, .35);
-  transform: translateZ(0);
+  background: linear-gradient(180deg, #26262a 0%, #111113 48%, #070708 100%);
+  box-shadow: inset 0 -2px 5px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .1);
 }
-.bodega-sign .bs-front::after {                      /* acrylic gloss */
+.bodega-sign .bs-face::after {                              /* glossy acrylic */
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(172deg, rgba(255, 255, 255, .16) 0%, rgba(255, 255, 255, .04) 38%, rgba(255, 255, 255, 0) 52%);
+  background: linear-gradient(176deg, rgba(255, 255, 255, .11) 0%, rgba(255, 255, 255, .03) 42%, rgba(255, 255, 255, 0) 50%);
+}
+/* box sides (generated) */
+.bodega-sign .bs-bottom { left: 0; top: var(--bs-t); width: 100%; height: var(--bs-d); transform-origin: 50% 0; transform: rotateX(-90deg); background: #0b0b0c; }
+.bodega-sign .bs-right  { left: 100%; top: var(--bs-aw); width: var(--bs-d); height: var(--bs-h); transform-origin: 0 50%; transform: rotateY(90deg); background: linear-gradient(90deg, #1b1b1e, #08080a); }
+.bodega-sign .bs-back   { left: 0; top: var(--bs-aw); width: 100%; height: var(--bs-h); transform: translateZ(calc(var(--bs-d) * -1)); background: #050505;
+                          box-shadow: 0 calc(var(--bs-h) * .14) calc(var(--bs-h) * .22) calc(var(--bs-h) * -.08) rgba(0, 0, 0, .38); }
+
+/* orange awning / fascia (generated): band on top, wraps down the left end */
+.bodega-sign .bs-aw-front {
+  left: 0; top: 0; width: 100%; height: var(--bs-aw);
+  transform: translateZ(var(--bs-f));
+  background: linear-gradient(180deg, #ffab4d 0%, #ff8a1e 45%, #ee6c07 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(120, 40, 0, .45);
+}
+.bodega-sign .bs-aw-left {
+  left: 0; top: var(--bs-aw); width: var(--bs-lw); height: var(--bs-h);
+  transform: translateZ(var(--bs-f));
+  background: linear-gradient(90deg, #ffa043, #f2760f);
+  box-shadow: inset 0 -1px 0 rgba(120, 40, 0, .45);
+}
+.bodega-sign .bs-aw-under { left: var(--bs-lw); top: var(--bs-aw); width: calc(100% - var(--bs-lw)); height: var(--bs-f);
+                            transform-origin: 50% 0; transform: translateZ(var(--bs-f)) rotateX(-90deg); background: #8f3c03; }
+.bodega-sign .bs-aw-inner { left: var(--bs-lw); top: var(--bs-aw); width: var(--bs-f); height: var(--bs-h);
+                            transform-origin: 0 50%; transform: translateZ(var(--bs-f)) rotateY(90deg); background: #b44c05; }
+.bodega-sign .bs-aw-sbot  { left: 0; top: var(--bs-t); width: var(--bs-lw); height: calc(var(--bs-f) + var(--bs-d));
+                            transform-origin: 50% 0; transform: translateZ(var(--bs-f)) rotateX(-90deg); background: #a64604; }
+.bodega-sign .bs-aw-end   { left: 0; top: 0; width: calc(var(--bs-f) + var(--bs-d)); height: var(--bs-t);
+                            transform-origin: 0 50%; transform: translateZ(var(--bs-f)) rotateY(90deg);
+                            background: linear-gradient(90deg, #e2680a, #b04a04); }
+.bodega-sign .bs-aw-rend  { left: 100%; top: 0; width: calc(var(--bs-f) + var(--bs-d)); height: var(--bs-aw);
+                            transform-origin: 0 50%; transform: translateZ(var(--bs-f)) rotateY(90deg); background: #c45507; }
+.bodega-sign .bs-aw-slope {                                 /* angled top, rising toward the wall */
+  left: 0; top: 0; width: 100%;
+  height: calc((var(--bs-f) + var(--bs-d)) / .97);
+  transform-origin: 50% 0;
+  transform: translateZ(var(--bs-f)) rotateX(-104deg);
+  background:
+    linear-gradient(0deg, rgba(255, 255, 255, .22), rgba(0, 0, 0, .12)),
+    repeating-linear-gradient(90deg, #ffa548 0 calc(var(--bs-w) * .022), #f08a2c 0 calc(var(--bs-w) * .025));
 }
 
-.bodega-sign .bs-panel {
+/* ---------- copy: channel letters + LED tagline + pill ---------- */
+.bodega-sign .bs-copy {
   position: absolute;
-  inset: var(--bs-band);
-  border-radius: calc(var(--bs-radius) * .45);
-  background: radial-gradient(120% 150% at 50% 30%, #3e0b11 0%, #1f0407 58%, #130204 100%);
-  box-shadow:
-    inset 0 2px 7px rgba(0, 0, 0, .75),
-    0 0 0 1px rgba(255, 205, 120, .28),
-    0 1px 0 1px rgba(255, 255, 255, .12);
+  top: 0;
+  bottom: 0;
+  left: var(--bs-lw);
+  right: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
 }
-
-/* ---------- neon lettering ---------- */
+.bodega-sign .bs-copy-in { display: inline-flex; flex-direction: column; align-items: stretch; }
 .bodega-sign .bs-name {
   position: relative;
-  z-index: 0;
   margin: 0;
-  padding: 0 0 0 .07em;                              /* balances trailing letter-spacing */
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-weight: 800;
-  font-size: calc(var(--bs-w) * .066);
-  line-height: 1.05;
-  letter-spacing: .07em;
+  padding: 0;
+  font-family: "Archivo Black", "Arial Black", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  font-size: calc(var(--bs-w) * .074);
+  line-height: 1;
+  letter-spacing: .01em;
   text-transform: uppercase;
   white-space: nowrap;
-  color: #fff2ef;
-  text-shadow:
-    0 0 .03em #fff,
-    0 0 .09em #ffc4ca,
-    0 0 .2em #ff4258,
-    0 0 .42em #ff1a3c,
-    0 0 .8em #d4002c;
+  color: #fff;
 }
-.bodega-sign .bs-neon { position: relative; }
-.bodega-sign .bs-l { display: inline; }
-.bodega-sign .bs-bloom {                             /* blurred copy: glow boost near the pointer */
+.bodega-sign .bs-word { position: relative; display: inline-block; }
+.bodega-sign .bs-gap { display: inline-block; width: .32em; }
+.bodega-sign .bs-wg,                                         /* lit edge + glow, behind */
+.bodega-sign .bs-wf { display: block; }                      /* gradient face, in front */
+.bodega-sign .bs-wg {
+  color: rgb(var(--c1, 255 60 60));
+  -webkit-text-stroke: .035em rgb(var(--c1, 255 60 60) / .9);
+  text-shadow:
+    0 0 .05em rgb(var(--c1, 255 60 60)),
+    0 0 .2em rgb(var(--c1, 255 60 60) / .75),
+    0 0 .55em rgb(var(--c1, 255 60 60) / .45);
+  opacity: .8;
+}
+.bodega-sign .bs-wf {
   position: absolute;
-  z-index: -1;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding-left: .07em;
-  text-align: left;
-  color: #ff2a48;
-  text-shadow: none;
-  filter: blur(.14em);
-  opacity: .3;
-  pointer-events: none;
+  inset: 0;
+  background-image: linear-gradient(180deg,
+    rgb(var(--hi, 255 200 200)) 0%,
+    rgb(var(--c1, 255 60 60)) 42%,
+    rgb(var(--c2, 255 140 0)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: .008em rgba(255, 255, 255, .45);  /* bevel highlight */
 }
 .bodega-sign .bs-sr {
   position: absolute;
@@ -201,74 +216,60 @@
   border: 0;
 }
 
-.bodega-sign .bs-sub {
-  margin: calc(var(--bs-w) * .017) 0 0;
-  padding: 0 0 0 .34em;
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-weight: 700;
-  font-size: max(8.5px, calc(var(--bs-w) * .019));
-  line-height: 1.2;
-  letter-spacing: .34em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: #fff4d2;
-  text-shadow: 0 0 .1em #fff, 0 0 .35em #ffc73a, 0 0 .9em #ff981a;
+.bodega-sign .bs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  margin-top: calc(var(--bs-w) * .014);
+  font-size: max(7.5px, calc(var(--bs-w) * .0175));
   transition: opacity .35s ease;
 }
-.bodega-sign.is-compact .bs-sub { opacity: 0; }
-
-/* ---------- marquee bulbs (placed by sign.js) ---------- */
-.bodega-sign .bs-bulbs {
-  position: absolute;
-  inset: 0;
-  font-size: calc(var(--bs-band) * .5);
-  pointer-events: none;
+.bodega-sign .bs-sub {
+  margin: 0;
+  padding: 0;
+  font-family: "DM Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 1em;
+  line-height: 1.2;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(235, 235, 235, .6);
 }
-.bodega-sign .bs-bulb {
-  position: absolute;
-  width: 1em;
-  height: 1em;
-  margin: -.5em 0 0 -.5em;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #a07a40, #5a3512 72%);   /* unlit glass */
-  box-shadow: 0 0 0 .13em #46060a, 0 .1em .12em .13em rgba(0, 0, 0, .35); /* socket */
+.bodega-sign .bs-led { transition: color .12s linear; }
+.bodega-sign .bs-pill {
+  flex: none;
+  padding: .3em .85em .32em;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 999px;
+  font-family: "DM Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: .95em;
+  line-height: 1;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, .82);
 }
-.bodega-sign .bs-bulb::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 42% 38%, #fffef6 0 18%, #ffeaa8 38%, #ffca40 70%, #f59b1b 100%);
-  box-shadow: 0 0 .35em .12em rgba(255, 214, 102, .9), 0 0 1em .3em rgba(255, 160, 40, .45);
-  animation: bs-chase 1.05s linear infinite;
-  animation-delay: calc(var(--p, 0) * -.35s);
+@media (max-width: 520px) {
+  .bodega-sign .bs-pill { display: none; }
+  .bodega-sign .bs-row { justify-content: center; }
 }
-.bodega-sign .bs-bulb.bs-tw::after { animation: bs-twinkle 4.3s linear infinite; animation-delay: calc(var(--p, 0) * -1.3s); }
-
-@keyframes bs-chase {
-  0%, 26% { opacity: 1; }
-  38%, 88% { opacity: .2; }
-  100% { opacity: 1; }
-}
-@keyframes bs-twinkle {
-  0%, 41%, 46%, 58%, 100% { opacity: 1; }
-  43% { opacity: .15; }
-  44.5% { opacity: .8; }
-  52% { opacity: .35; }
-}
+.bodega-sign.is-compact .bs-row { opacity: 0; }
 
 /* ---------- moving specular glare ---------- */
 .bodega-sign .bs-glare {
   position: absolute;
   left: 0;
   top: 0;
-  width: calc(var(--bs-w) * .6);
-  height: calc(var(--bs-w) * .6);
-  margin: calc(var(--bs-w) * -.3) 0 0 calc(var(--bs-w) * -.3);
+  width: calc(var(--bs-w) * .55);
+  height: calc(var(--bs-w) * .55);
+  margin: calc(var(--bs-w) * -.275) 0 0 calc(var(--bs-w) * -.275);
   border-radius: 50%;
   pointer-events: none;
-  background: radial-gradient(closest-side, rgba(255, 255, 255, .4), rgba(255, 250, 240, .14) 34%, rgba(255, 255, 255, 0));
-  transform: translate3d(calc(var(--bs-w) * .5), 30%, 0);
+  background: radial-gradient(closest-side, rgba(255, 255, 255, .16), rgba(255, 255, 255, .05) 40%, rgba(255, 255, 255, 0));
+  transform: translate3d(calc(var(--bs-w) * .5), 0, 0);
   opacity: .6;
   will-change: transform, opacity;
 }
@@ -277,11 +278,11 @@
 body.sign-lit .sign-ambient {
   position: fixed;
   inset: 0;
-  z-index: 11;                                       /* above content + nav (10), below the sign (12) and the order bar (20) */
+  z-index: 11;                                        /* above content + nav (10), below the sign (12) */
   pointer-events: none;
-  background: radial-gradient(ellipse min(86vw, 820px) 460px at 50% var(--sign-h, 200px),
-    rgb(var(--sign-glow, 255 104 64) / .12) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .05) 42%,
+  background: radial-gradient(ellipse min(86vw, 820px) 440px at 50% var(--sign-h, 180px),
+    rgb(var(--sign-glow, 255 104 64) / .10) 0%,
+    rgb(var(--sign-glow, 255 104 64) / .04) 42%,
     rgb(var(--sign-glow, 255 104 64) / 0) 78%);
   opacity: calc(.55 + .45 * var(--sign-intensity, .5));
 }
@@ -292,24 +293,23 @@ body.sign-lit .tile::after {
   z-index: 4;
   pointer-events: none;
   background: radial-gradient(circle 300px at var(--lx, 50%) var(--ly, -30%),
-    rgb(255 246 236 / .36) 0%,
-    rgb(var(--sign-glow, 255 104 64) / .09) 32%,
+    rgb(255 255 255 / .3) 0%,
+    rgb(var(--sign-glow, 255 104 64) / .085) 30%,
     rgb(var(--sign-glow, 255 104 64) / 0) 72%);
-  opacity: calc(.4 + .6 * var(--sign-intensity, .5));
+  opacity: calc(.45 + .55 * var(--sign-intensity, .5));
 }
 body.sign-lit main section h2 {
-  text-shadow: 0 0 .7em rgb(var(--sign-glow, 255 104 64) / calc(.12 + .16 * var(--sign-intensity, .5)));
+  text-shadow: 0 0 .7em rgb(var(--sign-glow, 255 104 64) / calc(.14 + .16 * var(--sign-intensity, .5)));
 }
 body.sign-lit .price {
-  text-shadow: 0 0 .55em rgb(var(--sign-glow, 255 104 64) / .2);
+  text-shadow: 0 0 .55em rgb(var(--sign-glow, 255 104 64) / .22);
 }
 
-/* ---------- reduced motion: static lit sign ---------- */
+/* ---------- reduced motion: static sign ---------- */
 @media (prefers-reduced-motion: reduce) {
   .bodega-sign,
   .bodega-sign .bs-stage,
-  .bodega-sign .bs-sub { transition: none; }
-  .bodega-sign .bs-bulb::after,
-  .bodega-sign .bs-bulb.bs-tw::after { animation: none; opacity: 1; }
+  .bodega-sign .bs-row,
+  .bodega-sign .bs-led { transition: none; }
   .bodega-sign .bs-box { will-change: auto; }
 }

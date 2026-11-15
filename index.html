@@ -7,7 +7,7 @@
 <meta name="description" content="Kitchen and store menu. Order on WhatsApp.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="sign.css">
 <style>
   :root {
@@ -43,7 +43,9 @@
   nav a { flex: none; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
           text-decoration: none; padding-bottom: 2px; border-bottom: 2px solid transparent; }
   nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
-  nav .main a { font-size: 13px; font-weight: 700; letter-spacing: .08em; }
+  nav .main { gap: 14px; }
+  nav .main a { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+  @media (min-width: 420px) { nav .main { gap: 22px; } nav .main a { font-size: 13px; letter-spacing: .08em; } }
   nav .sub { border-top: 1px solid var(--line); padding-top: 11px; padding-bottom: 11px; gap: 18px; }
   nav .sub:empty { display: none; }
   nav .sub a { font-weight: 600; }
@@ -179,16 +181,17 @@
 </head>
 <body>
 
-<header class="bodega-sign" data-glow="255 104 64" title="Back to menu home">
+<header class="bodega-sign" title="Back to menu home">
   <div class="bs-stage">
-    <div class="bs-halo" aria-hidden="true"></div>
     <div class="bs-box">
-      <div class="bs-front">
-        <div class="bs-bulbs" aria-hidden="true"></div>
-        <div class="bs-panel">
+      <div class="bs-face">
+        <div class="bs-copy"><div class="bs-copy-in">
           <h1 class="bs-name" id="storeName">Gonzales Bodega</h1>
-          <p class="bs-sub" id="storeLine">Deli · Grocery · 24 Hrs</p>
-        </div>
+          <div class="bs-row">
+            <p class="bs-sub" id="storeLine">Deli • Grocery • 24 Hrs</p>
+            <span class="bs-pill" aria-hidden="true">Order on WhatsApp</span>
+          </div>
+        </div></div>
         <div class="bs-glare" aria-hidden="true"></div>
       </div>
     </div>

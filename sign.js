@@ -1,22 +1,28 @@
-/* Gonzales Bodega — 3D lit lightbox sign. Vanilla JS, no dependencies.
-   Self-initializes every .bodega-sign on DOMContentLoaded (see sign.css for markup + API). */
+/* Gonzales Bodega — 3D storefront sign. Vanilla JS, no dependencies.
+   Self-initializes every .bodega-sign on DOMContentLoaded (markup + API: see sign.css). */
 (function () {
   "use strict";
 
-  var MAX_Y = 15, MAX_X = 12;           // max tilt in degrees
-  var LAYERS = 10;                      // extrusion slices
-  var COMPACT_ON = 64, COMPACT_OFF = 24; // scroll hysteresis (px)
-  var FLICKER = [[70, .2], [55, 1], [90, .3], [40, .85], [130, .22], [80, 1]]; // [ms, opacity]
+  var MAX_Y = 7, MAX_X = 5;              // max tilt in degrees
+  var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
+  var STEP = 3.6;                         // seconds per palette colour
+  var COLOR_MS = 66;                      // colour updates ~15 fps (slow drift, cheap repaints)
+  var PAL = [[255, 46, 46], [255, 138, 0], [255, 212, 0], [28, 226, 92], [38, 140, 255], [236, 52, 196]];
+  var LED = [[255, 150, 150], [255, 205, 140], [250, 240, 165], [160, 235, 180], [160, 200, 255], [245, 170, 225], [225, 225, 225]];
+  var WORD_OFFSET = 2.5;                  // palette steps between words
+  var FACES = ["bs-back", "bs-bottom", "bs-right", "bs-aw-end", "bs-aw-sbot", "bs-aw-rend",
+    "bs-aw-slope", "bs-aw-under", "bs-aw-inner", "bs-aw-left", "bs-aw-front"];
 
   var mm = function (q) { return window.matchMedia ? window.matchMedia(q) : { matches: false }; };
   var mqReduce = mm("(prefers-reduced-motion: reduce)");
   var noHover = mm("(hover: none)").matches;
   var root = document.documentElement;
-  var signs = [], raf = 0, lastT = 0;
+  var signs = [], raf = 0, lastT = 0, lastColor = -1e9;
   var P = { x: 0, y: 0, on: false, mouse: false };
-  var rootVals = {};                    // last written :root vars
+  var O = { init: false, dx: 0, dy: 0, t: -1e9, bg: 0, bb: 0 };   // device orientation
+  var rootVals = {};
   var light = { x: -1, y: -1 };
-  var tiles = { seen: new WeakSet(), vis: new Set(), io: null, lastScan: 0 };
+  var tiles = { seen: new WeakSet(), vis: new Set(), io: null, lastScan: -1e9 };
 
   function el(tag, cls, parent, before) {
     var e = document.createElement(tag);
@@ -32,8 +38,40 @@
   function setStyle(node, prop, val, cache) {
     if (node && node[cache] !== val) { node[cache] = val; node.style[prop] = val; }
   }
+  function setVar(node, name, val) {
+    var k = "_" + name;
+    if (node[k] !== val) { node[k] = val; node.style.setProperty(name, val); }
+  }
 
-  /* ---------- neon letters (rebuilt if page JS later sets the h1 text) ---------- */
+  /* ---------- colour ---------- */
+  function palAt(x) {
+    var n = PAL.length;
+    x = ((x % n) + n) % n;
+    var i = Math.floor(x), f = x - i, a = PAL[i], b = PAL[(i + 1) % n];
+    f = f * f * (3 - 2 * f);                                 // ease: colours linger, then glide
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  }
+  function mix(c, d, t) { return [c[0] + (d[0] - c[0]) * t, c[1] + (d[1] - c[1]) * t, c[2] + (d[2] - c[2]) * t]; }
+  function rgb(c) { return Math.round(c[0]) + " " + Math.round(c[1]) + " " + Math.round(c[2]); }
+
+  function paint(s, t, still) {
+    var glow = null;
+    s.words.forEach(function (w, i) {
+      var x = still ? i * 3 : t / STEP + i * WORD_OFFSET;    // still: red / green
+      var c1 = palAt(x), c2 = mix(palAt(x + .8), [0, 0, 0], .12), hi = mix(c1, [255, 255, 255], .55);
+      setVar(w, "--c1", rgb(c1));
+      setVar(w, "--c2", rgb(c2));
+      setVar(w, "--hi", rgb(hi));
+      if (!glow) glow = c1;
+    });
+    s.leds.forEach(function (l, j) {
+      var c = still ? LED[6] : LED[Math.floor(t / l.dur + l.ph) % LED.length];
+      setStyle(l.el, "color", "rgb(" + rgb(c) + " / .62)", "_c");
+    });
+    return glow;
+  }
+
+  /* ---------- letters (two layers per word: lit edge/glow + gradient face) ---------- */
   function buildName(s) {
     var h = s.name;
     if (s.mo) s.mo.disconnect();
@@ -41,95 +79,64 @@
     var text = (sr ? sr.textContent : h.textContent).replace(/\s+/g, " ").trim();
     h.textContent = "";
     el("span", "bs-sr", h).textContent = text;
-    var neon = hidden(el("span", "bs-neon", h));
-    s.bloom = hidden(el("span", "bs-bloom", h));
-    s.bloom.textContent = text;
-    var letters = [];
-    for (var i = 0; i < text.length; i++) {
-      if (text[i] === " ") { neon.appendChild(document.createTextNode(" ")); continue; }
-      var l = el("span", "bs-l", neon);
-      l.textContent = text[i];
-      letters.push(l);
-    }
-    var f = parseInt(s.root.getAttribute("data-flicker"), 10);   // letter index, -1 disables
-    s.flick = letters[isNaN(f) ? Math.max(0, letters.length - 4) : f] || null;
+    var vis = hidden(el("span", "bs-letters", h));
+    s.words = [];
+    text.split(" ").forEach(function (word, i) {
+      if (i) el("span", "bs-gap", vis);
+      var w = el("span", "bs-word", vis);
+      el("span", "bs-wg", w).textContent = word;
+      el("span", "bs-wf", w).textContent = word;
+      s.words.push(w);
+    });
+    s.glows = h.querySelectorAll(".bs-wg");
     if (s.mo) s.mo.observe(h, { childList: true, characterData: true, subtree: true });
   }
-
-  /* ---------- bulbs along the frame's rounded-rect centre line ---------- */
-  function pointAt(d, x0, y0, w, h, r) {
-    var a = Math.PI * r / 2, sw = w - 2 * r, sh = h - 2 * r;
-    var seg = [sw, a, sh, a, sw, a, sh, a], i = 0;
-    while (i < 7 && d > seg[i]) { d -= seg[i]; i++; }
-    var t = seg[i] ? d / seg[i] : 0, ang = (i - 1) / 4 * Math.PI - Math.PI / 2 + t * Math.PI / 2;
-    switch (i) {
-      case 0: return [x0 + r + d, y0];
-      case 2: return [x0 + w, y0 + r + d];
-      case 4: return [x0 + w - r - d, y0 + h];
-      case 6: return [x0, y0 + h - r - d];
-    }
-    var cx = i === 1 || i === 3 ? x0 + w - r : x0 + r;
-    var cy = i === 1 || i === 7 ? y0 + r : y0 + h - r;
-    return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
-  }
-  function layoutBulbs(s) {
-    var W = s.front.offsetWidth, H = s.front.offsetHeight;
-    if (!W || !H) return;
-    s.W = W; s.H = H;
-    var band = s.panel ? s.panel.offsetLeft : W * .05;
-    var R = parseFloat(getComputedStyle(s.front).borderTopLeftRadius) || 0;
-    var x0 = band / 2, y0 = band / 2, w = W - band, h = H - band;
-    var r = clamp(R - band / 2, 0, Math.min(w, h) / 2);
-    var L = 2 * (w - 2 * r) + 2 * (h - 2 * r) + 2 * Math.PI * r;
-    var n = Math.max(12, Math.round(L / Math.max(11, band * .95) / 3) * 3);
-    if (n === s.bulbCount && W === s.bulbW) return;
-    s.bulbCount = n; s.bulbW = W;
-    var start = (w - 2 * r) / 2, html = "";
-    for (var i = 0; i < n; i++) {
-      var p = pointAt((start + i * L / n) % L, x0, y0, w, h, r);
-      var tw = (i * 7 + 3) % 23 === 0 ? " bs-tw" : "";
-      html += '<i class="bs-bulb' + tw + '" style="left:' + (p[0] / W * 100).toFixed(3) + "%;top:" +
-        (p[1] / H * 100).toFixed(3) + "%;--p:" + (i % 3) + '"></i>';
-    }
-    s.bulbs.innerHTML = html;
+  function buildLeds(s) {
+    var p = s.sub;
+    s.leds = [];
+    if (!p) return;
+    if (s.mo2) s.mo2.disconnect();
+    var text = p.textContent.replace(/\s+/g, " ").trim().replace(/\s*[·•|]\s*/g, " • ");
+    p.textContent = "";
+    text.split(/( • )/).forEach(function (part, i) {
+      if (!part) return;
+      var e = el("span", "bs-led", p);
+      e.textContent = part;
+      s.leds.push({ el: e, dur: .55 + ((i * 37) % 9) / 10, ph: (i * 2.3) % LED.length });
+    });
+    if (s.mo2) s.mo2.observe(p, { childList: true, characterData: true, subtree: true });
   }
 
-  /* ---------- extrusion slices: gold trim, then red fading to near black ---------- */
-  function buildLayers(s) {
-    if (s.box.querySelector(".bs-layer")) return;
-    var from = [122, 14, 20], to = [28, 3, 5];
-    for (var k = LAYERS; k >= 1; k--) {
-      var lay = hidden(el("div", "bs-layer" + (k === LAYERS ? " bs-back" : ""), s.box, s.front));
-      lay.style.setProperty("--k", k);
-      if (k === 1) { lay.style.background = "#d6a650"; continue; }
-      var t = (k - 2) / (LAYERS - 2);
-      lay.style.background = "rgb(" + from.map(function (c, j) { return Math.round(c + (to[j] - c) * t); }).join(",") + ")";
-    }
+  function buildFaces(s) {
+    if (s.box.querySelector(".bs-aw-front")) return;
+    FACES.forEach(function (cls) { hidden(el("div", cls, s.box, s.face)); });
   }
 
   function init(rootEl) {
     if (rootEl._bodegaSign) return;
     var q = function (c) { return rootEl.querySelector(c); };
-    var s = { root: rootEl, stage: q(".bs-stage"), box: q(".bs-box"), front: q(".bs-front"), panel: q(".bs-panel"),
-      name: q(".bs-name"), halo: q(".bs-halo"), glare: q(".bs-glare"), bulbs: q(".bs-bulbs"),
-      rx: 0, ry: 0, gx: .5, gy: .3, near: 0, flkNext: performance.now() + 2500, compact: false };
-    if (!s.stage || !s.box || !s.front) return;
+    var s = { root: rootEl, stage: q(".bs-stage"), box: q(".bs-box"), face: q(".bs-face"), name: q(".bs-name"),
+      sub: q(".bs-sub"), glare: q(".bs-glare"), words: [], leds: [], glows: [],
+      rx: 0, ry: 0, gx: .5, gy: .2, near: 0, compact: false, W: 0, H: 0 };
+    if (!s.stage || !s.box || !s.face) return;
     rootEl._bodegaSign = s;
-    if (!s.bulbs) s.bulbs = hidden(el("div", "bs-bulbs", s.front, s.front.firstChild));
-    if (!s.glare) s.glare = hidden(el("div", "bs-glare", s.front));
-    buildLayers(s);
-    if (s.name) {
-      if (window.MutationObserver) s.mo = new MutationObserver(function () { buildName(s); });
-      buildName(s);
+    if (!s.glare) s.glare = hidden(el("div", "bs-glare", s.face));
+    buildFaces(s);
+    if (window.MutationObserver) {
+      s.mo = new MutationObserver(function () { buildName(s); paint(s, performance.now() / 1000, mqReduce.matches); });
+      s.mo2 = new MutationObserver(function () { buildLeds(s); paint(s, performance.now() / 1000, mqReduce.matches); });
     }
-    layoutBulbs(s);
-    if (window.ResizeObserver) new ResizeObserver(function () { layoutBulbs(s); measure(); }).observe(s.front);
+    if (s.name) buildName(s);
+    buildLeds(s);
+    var size = function () { s.W = s.face.offsetWidth; s.H = s.face.offsetHeight; };
+    size();
+    if (window.ResizeObserver) new ResizeObserver(function () { size(); measure(); }).observe(s.face);
     rootEl.addEventListener("transitionend", function (e) { if (e.target === rootEl) measure(); });
     signs.push(s);
   }
 
   /* ---------- page-level state ---------- */
-  function measure() {                    // --sign-h from the primary sign (read, then write)
+  function measure() {
     var s = signs[0];
     if (s) setRoot("--sign-h", Math.round(s.root.getBoundingClientRect().height) + "px");
   }
@@ -142,7 +149,6 @@
     if (changed && mqReduce.matches) requestAnimationFrame(measure);
     if (!mqReduce.matches) start();
   }
-
   function scanTiles(now) {
     if (now - tiles.lastScan < 1000 || !tiles.io) return;
     tiles.lastScan = now;
@@ -150,17 +156,6 @@
     for (var i = 0; i < list.length; i++) {
       if (!tiles.seen.has(list[i])) { tiles.seen.add(list[i]); tiles.io.observe(list[i]); }
     }
-  }
-
-  function flickerAt(s, now) {
-    if (now < s.flkNext) return 1;
-    var e = now - s.flkNext;
-    for (var i = 0; i < FLICKER.length; i++) {
-      if (e < FLICKER[i][0]) return FLICKER[i][1];
-      e -= FLICKER[i][0];
-    }
-    s.flkNext = now + 3500 + Math.random() * 6000;
-    return 1;
   }
 
   /* ---------- the one rAF loop ---------- */
@@ -171,6 +166,7 @@
     lastT = now;
     var kT = 1 - Math.exp(-dt * 6), kN = 1 - Math.exp(-dt * 5);
     var vw = window.innerWidth, vh = window.innerHeight, t = now / 1000;
+    var useOri = !P.on && now - O.t < 1500;
     var primary = signs[0], prim = null;
     scanTiles(now);
 
@@ -192,32 +188,42 @@
         var dy = clamp((P.y - cy) / Math.max(120, P.y > cy ? vh - cy : cy), -1, 1);
         ty = dx * MAX_Y; tx = -dy * MAX_X;
         gx = clamp((P.x - r.left) / r.width, -.1, 1.1);
-        gy = clamp((P.y - r.top) / r.height, -.2, 1.2);
+        gy = clamp((P.y - r.top) / r.height, -.3, 1.3);
         var ex = Math.max(r.left - P.x, 0, P.x - r.right), ey = Math.max(r.top - P.y, 0, P.y - r.bottom);
-        near = clamp(1 - Math.sqrt(ex * ex + ey * ey) / 280, 0, 1);
-      } else if (noHover || !P.mouse) {     // idle sway (touch, or before the mouse ever moved)
-        ty = Math.sin(t * .55 + idx) * 4.5;
-        tx = Math.sin(t * .37 + idx) * 2.2;
+        near = clamp(1 - Math.sqrt(ex * ex + ey * ey) / 260, 0, 1);
+      } else if (useOri) {
+        ty = O.dx * MAX_Y; tx = -O.dy * MAX_X;
+      } else if (noHover || !P.mouse) {                    // idle sway
+        ty = Math.sin(t * .5 + idx) * 3;
+        tx = Math.sin(t * .33 + idx) * 1.5;
       }
-      if (gx === undefined) { gx = .5 + s.ry / MAX_Y * .45; gy = .3 - s.rx / MAX_X * .5; }
+      if (gx === undefined) { gx = .5 + s.ry / MAX_Y * .45; gy = .2 - s.rx / MAX_X * .5; }
       s.rx += (tx - s.rx) * kT; s.ry += (ty - s.ry) * kT;
       s.gx += (gx - s.gx) * kT; s.gy += (gy - s.gy) * kT;
       s.near += (near - s.near) * kN;
-      var flk = s.flick ? flickerAt(s, now) : 1;
-      var inten = (.45 + .55 * s.near) * (.8 + .2 * flk);
-      s.inten = inten; s.flk = flk;
+      s.inten = .45 + .55 * s.near;
 
       setStyle(s.box, "transform", "rotateX(" + s.rx.toFixed(2) + "deg) rotateY(" + s.ry.toFixed(2) + "deg)", "_t");
       if (s.W) setStyle(s.glare, "transform", "translate3d(" + (s.gx * s.W).toFixed(1) + "px," + (s.gy * s.H).toFixed(1) + "px,0)", "_t");
       setStyle(s.glare, "opacity", (.5 + .5 * s.near).toFixed(3), "_o");
-      setStyle(s.halo, "opacity", (.4 + .6 * inten).toFixed(3), "_o");
-      setStyle(s.bloom, "opacity", (.25 + .5 * s.near * flk).toFixed(3), "_o");
-      setStyle(s.flick, "opacity", String(flk), "_o");
-      if (idx === 0) prim = { cx: cx, cy: cy };
+      var go = (.72 + .28 * s.near).toFixed(3);
+      for (var g = 0; g < s.glows.length; g++) setStyle(s.glows[g], "opacity", go, "_o");
+      if (idx === 0) prim = { cx: cx, cy: cy, s: s };
     });
 
-    /* light position: pointer while present, sign centre otherwise */
-    var lx = P.on ? P.x : prim.cx, ly = P.on ? P.y : prim.cy;
+    /* colour cycle (throttled) → letters, LED tagline, --sign-glow */
+    if (now - lastColor >= COLOR_MS) {
+      lastColor = now;
+      signs.forEach(function (s, idx) {
+        var c = paint(s, t, false);
+        if (idx === 0 && c) setRoot("--sign-glow", rgb(c));
+      });
+    }
+
+    /* light position: pointer, device tilt, else sign centre */
+    var lx = prim.cx, ly = prim.cy;
+    if (P.on) { lx = P.x; ly = P.y; }
+    else if (useOri) { lx = prim.cx + prim.s.ry / MAX_Y * vw * .45; ly = prim.cy + vh * .35 - prim.s.rx / MAX_X * vh * .3; }
     if (light.x < 0) { light.x = lx; light.y = ly; }
     light.x += (lx - light.x) * kT; light.y += (ly - light.y) * kT;
     var LX = Math.round(light.x), LY = Math.round(light.y);
@@ -226,9 +232,9 @@
     setRoot("--light-x", LX + "px");
     setRoot("--light-y", LY + "px");
     for (var i = 0; i < tileList.length; i++) {
-      var tl = tileList[i], vx = (LX - Math.round(tileRects[i].left)) + "px", vy = (LY - Math.round(tileRects[i].top)) + "px";
-      if (tl._lx !== vx) { tl._lx = vx; tl.style.setProperty("--lx", vx); }
-      if (tl._ly !== vy) { tl._ly = vy; tl.style.setProperty("--ly", vy); }
+      var tl = tileList[i];
+      setVar(tl, "--lx", (LX - Math.round(tileRects[i].left)) + "px");
+      setVar(tl, "--ly", (LY - Math.round(tileRects[i].top)) + "px");
     }
     start();
   }
@@ -238,6 +244,30 @@
   function onTouch(e) {
     var tp = e.touches && e.touches[0];
     if (tp) { P.x = tp.clientX; P.y = tp.clientY; P.on = true; }
+  }
+  function onOrient(e) {
+    if (e.gamma == null || e.beta == null) return;
+    var ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    var g = e.gamma, b = e.beta;
+    if (ang === 90) { g = e.beta; b = -e.gamma; }
+    else if (ang === -90 || ang === 270) { g = -e.beta; b = e.gamma; }
+    var now = performance.now();
+    if (!O.init) { O.init = true; O.bg = g; O.bb = b; }
+    var k = 1 - Math.exp(-Math.min(.2, (now - O.t) / 1000) / 5); // re-centre on how the phone is held (~5 s)
+    O.bg += (g - O.bg) * k;
+    O.bb += (b - O.bb) * k;
+    O.dx = clamp((g - O.bg) / 20, -1, 1);
+    O.dy = clamp((b - O.bb) / 20, -1, 1);
+    O.t = now;
+    start();
+  }
+  function askOrientation() {                                // iOS 13+: needs a user gesture; never blocks
+    document.removeEventListener("touchend", askOrientation);
+    document.removeEventListener("click", askOrientation);
+    var D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === "function") {
+      try { D.requestPermission().catch(function () {}); } catch (err) { /* ignore */ }
+    }
   }
   function bind() {
     var o = { passive: true };
@@ -254,27 +284,30 @@
     window.addEventListener("scroll", onScroll, o);
     window.addEventListener("resize", function () { measure(); start(); }, o);
     document.addEventListener("visibilitychange", function () { lastT = 0; start(); });
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener("deviceorientation", onOrient, o);
+      document.addEventListener("touchend", askOrientation, o);
+      document.addEventListener("click", askOrientation, o);
+    }
     if (mqReduce.addEventListener) mqReduce.addEventListener("change", reset);
   }
 
-  function reset() {                      // apply / remove the static reduced-motion state
-    signs.forEach(function (s) {
-      if (!mqReduce.matches) return;
+  function reset() {                                         // static state for reduced motion
+    if (!mqReduce.matches) { start(); return; }
+    signs.forEach(function (s, idx) {
       s.rx = s.ry = s.near = 0;
       setStyle(s.box, "transform", "none", "_t");
-      if (s.W) setStyle(s.glare, "transform", "translate3d(" + (.5 * s.W) + "px," + (.3 * s.H) + "px,0)", "_t");
-      setStyle(s.flick, "opacity", "1", "_o");
-      setStyle(s.bloom, "opacity", ".3", "_o");
-      setStyle(s.halo, "opacity", ".6", "_o");
+      if (s.W) setStyle(s.glare, "transform", "translate3d(" + (.5 * s.W) + "px," + (.2 * s.H) + "px,0)", "_t");
+      for (var g = 0; g < s.glows.length; g++) setStyle(s.glows[g], "opacity", ".8", "_o");
+      var c = paint(s, 0, true);
+      if (idx === 0 && c) setRoot("--sign-glow", rgb(c));
     });
-    if (mqReduce.matches) {
-      setRoot("--sign-intensity", ".5");
-      var r = signs[0].stage.getBoundingClientRect();
-      setRoot("--light-x", Math.round(r.left + r.width / 2) + "px");
-      setRoot("--light-y", Math.round(r.top + r.height / 2) + "px");
-      tiles.vis.forEach(function (tl) { tl.style.removeProperty("--lx"); tl.style.removeProperty("--ly"); tl._lx = tl._ly = null; });
-      measure();
-    } else start();
+    setRoot("--sign-intensity", ".5");
+    var r = signs[0].stage.getBoundingClientRect();
+    setRoot("--light-x", Math.round(r.left + r.width / 2) + "px");
+    setRoot("--light-y", Math.round(r.top + r.height / 2) + "px");
+    tiles.vis.forEach(function (tl) { tl.style.removeProperty("--lx"); tl.style.removeProperty("--ly"); tl["_--lx"] = tl["_--ly"] = null; });
+    measure();
   }
 
   function initAll() {
@@ -283,8 +316,10 @@
     if (!signs.length) return;
     if (!document.querySelector(".sign-ambient")) hidden(el("div", "sign-ambient", document.body));
     document.body.classList.add("sign-lit");
-    setRoot("--sign-glow", (signs[0].root.getAttribute("data-glow") || "255 104 64").trim());
-    if (window.IntersectionObserver) {
+    var g0 = signs[0].root.getAttribute("data-glow");
+    setRoot("--sign-glow", g0 ? g0.trim() : rgb(PAL[0]));
+    signs.forEach(function (s) { paint(s, performance.now() / 1000, mqReduce.matches); });
+    if (window.IntersectionObserver && !tiles.io) {
       tiles.io = new IntersectionObserver(function (entries) {
         entries.forEach(function (en) { if (en.isIntersecting) tiles.vis.add(en.target); else tiles.vis.delete(en.target); });
       }, { rootMargin: "120px 0px" });
