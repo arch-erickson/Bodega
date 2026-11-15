@@ -29,6 +29,21 @@
   var PAL = [[255, 46, 46], [255, 132, 0], [255, 206, 0], [28, 214, 92], [38, 136, 255], [236, 52, 196]];
   var LED = [[214, 58, 52], [226, 120, 18], [190, 146, 0], [34, 150, 84], [42, 112, 214], [196, 56, 160], [128, 128, 134]];
   var WORD_OFFSET = 2.5;                  // palette steps between words (never the same colour)
+  var SATURATION = .8;                    // scale on the palettes' HSL saturation (1 = original; .8 = 20% less)
+  function desat(c) {                     // keep hue and lightness, scale saturation
+    var r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    if (!d) return c.slice();
+    var s = d / (1 - Math.abs(2 * l - 1)), h;
+    if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    s *= SATURATION;
+    var C = (1 - Math.abs(2 * l - 1)) * s, X = C * (1 - Math.abs((h % 2 + 2) % 2 - 1)), m = l - C / 2, o;
+    h = (h + 6) % 6;
+    o = h < 1 ? [C, X, 0] : h < 2 ? [X, C, 0] : h < 3 ? [0, C, X] : h < 4 ? [0, X, C] : h < 5 ? [X, 0, C] : [C, 0, X];
+    return [Math.round((o[0] + m) * 255), Math.round((o[1] + m) * 255), Math.round((o[2] + m) * 255)];
+  }
+  PAL = PAL.map(desat);
+  LED = LED.map(desat);
 
   /* letter construction, in em (cap height = .688em) */
   var DEPTH = .17;                        // extrusion ≈ 25% of the cap height

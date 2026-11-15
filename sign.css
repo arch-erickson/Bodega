@@ -112,7 +112,7 @@
   letter-spacing: .02em;
   text-transform: uppercase;
   white-space: nowrap;
-  color: #e4342b;
+  color: #d2453d;
 }
 .bodega-sign .bs-letters { display: flex; flex-direction: column; gap: .04em 0; align-items: center; justify-content: center; transition: opacity .3s ease; }
 .bodega-sign .bs-word {
