@@ -22,11 +22,12 @@
   var GAIN_PX = .022;                     // deg per px of mouse / finger movement
   var GAIN_TILT = .5;                     // deg of yaw per degree the phone is turned left/right (gamma)
   var GAIN_BETA = .4;                     // deg of pitch per degree the phone is tipped toward/away (beta)
-  var MAX_Y_PHONE = 9, MAX_X_PHONE = 6;   // phones: a bigger range so "orbiting" the phone clearly turns the sign
-  var RECENTER_S = 2.2;                   // phones: once the phone is still (~0.8 s) the sign eases back to centre
-  var Y = { off: 0, offX: 0, lx: null, lg: null, lb: null, t: -1e9 };   // yaw / pitch offsets; last touch x, gamma, beta
+  var MAX_X = 3;                          // desktop: limit of the pitch (up/down tilt) from vertical mouse movement (deg)
+  var MAX_Y_PHONE = 5, MAX_X_PHONE = 4;   // phones: a bigger range so "orbiting" the phone clearly turns the sign
+  var ORI_SMOOTH = .7, ORI_DEAD = .12;    // phones: low-pass the sensor and ignore sub-0.12° jitter (no drifting)
+  var Y = { off: 0, offX: 0, lx: null, ly: null, lg: null, lb: null, fg: null, fb: null, drag: false, t: -1e9 };   // yaw / pitch offsets; last touch x, gamma, beta
   function nudge(d) { var m = noHover ? MAX_Y_PHONE : MAX_Y; Y.off = clamp(Y.off + d, -m, m); Y.t = performance.now(); start(); }
-  function nudgeX(d) { Y.offX = clamp(Y.offX + d, -MAX_X_PHONE, MAX_X_PHONE); Y.t = performance.now(); start(); }
+  function nudgeX(d) { var m = noHover ? MAX_X_PHONE : MAX_X; Y.offX = clamp(Y.offX + d, -m, m); Y.t = performance.now(); start(); }
   var COMPACT_ON = 64, COMPACT_OFF = 24;  // scroll hysteresis (px)
   var STEP = 3.6;                         // seconds per palette colour
   var COLOR_MS = 66;                      // colour updates ~15 fps
@@ -406,6 +407,7 @@
     var a = hw * Math.cos(th), zp = -hw * Math.sin(th), xo = -a * zp / d;
     var zf = DEPTH / 2;                                                        // front faces sit this far in front of z = 0
     var halfW = (a + xo) * d / (d - zp - zf) + .22;                          // projected half width at rest (em)
+    if (noHover) halfW *= 1.14;                                               // phones: room for the near end to grow when tilted
     var fit = Math.min(1, (W - 24) / 2 / fs / halfW);                        // never wider than the page
     g.camera.aspect = W / (half * 2);
     g.camera.fov = 2 * Math.atan((half * 2 / fs) / (2 * d * fit)) / DEG;     // 1 world unit = 1em on screen at z = 0
@@ -613,13 +615,6 @@
     var useOri = !P.on && now - O.t < 1500;
     var primary = signs[0], pcx = 0, pcy = 0, tiltSpeed = 0;
 
-    /* phones: when the phone has been still for a moment, ease the sign back to facing straight ahead */
-    if (noHover && now - Y.t > 800 && (Y.off || Y.offX)) {
-      var kr = Math.exp(-dt / RECENTER_S);
-      Y.off = Math.abs(Y.off) < .01 ? 0 : Y.off * kr;
-      Y.offX = Math.abs(Y.offX) < .01 ? 0 : Y.offX * kr;
-    }
-
     /* reads */
     var signH = primary.root.getBoundingClientRect().height;
     var colorTick = now - lastColor >= COLOR_MS;
@@ -628,18 +623,18 @@
     for (var idx = 0; idx < signs.length; idx++) {
       var s = signs[idx], r = s.name.getBoundingClientRect();
       var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var ty = REST_Y + Y.off, near = 0;                     // yaw only (verticals stay vertical); offset is relative
+      /* one-point perspective, facing forward: it turns and tips only with the user's own movement
+         (never by itself), by the accumulated, clamped offsets */
+      var ty = REST_Y + Y.off, near = 0;
       if (P.on) {
         var ex = Math.max(r.left - P.x, 0, P.x - r.right), ey = Math.max(r.top - P.y, 0, P.y - r.bottom);
         near = clamp(1 - Math.sqrt(ex * ex + ey * ey) / 260, 0, 1);
-      } else if (!useOri && !reduce && (noHover || !P.mouse)) {   // idle sway until someone interacts
-        ty += Math.sin(t * .5 + idx) * 2.5;
       }
       var pry = s.ry, prx = s.rx, pn = s.near;
-      s.ry += (ty - s.ry) * kT;
+      s.ry = ty;                                             // instant: follows the movement in the same frame
       s.near += (near - s.near) * kN;
       s.inten = .45 + .55 * s.near;
-      s.rx += (Y.offX - s.rx) * kT;
+      s.rx = Y.offX;
       var moved = Math.abs(s.ry - pry) > .002 || Math.abs(s.rx - prx) > .002 || Math.abs(s.near - pn) > .002;
       if (idx === 0) tiltSpeed = (Math.abs(s.ry - pry) + Math.abs(s.rx - prx)) / dt;
 
@@ -677,8 +672,7 @@
   function onTouch(e) {
     var tp = e.touches && e.touches[0];
     if (!tp) return;
-    if (e.type === "touchmove" && Y.lx != null) nudge((tp.clientX - Y.lx) * GAIN_PX);
-    Y.lx = tp.clientX;
+    /* fingers never rotate the sign (scrolling must not move it): on phones only rotating the phone does */
     P.x = tp.clientX; P.y = tp.clientY; P.on = true;
   }
   function onOrient(e) {
@@ -694,12 +688,14 @@
     O.bb += (b - O.bb) * k;
     O.dx = clamp((g - O.bg) / 20, -1, 1);
     O.dy = clamp((b - O.bb) / 20, -1, 1);
-    if (Y.lg != null) {                                      // relative: turning / tipping the phone nudges the sign
-      var dg = g - Y.lg, db = b - Y.lb;
-      if (Math.abs(dg) < 30 && Math.abs(dg) > .05) nudge(dg * GAIN_TILT);    // ignore jumps (gamma wraps at ±90°) and sensor noise
-      if (Math.abs(db) < 30 && Math.abs(db) > .05) nudgeX(-db * GAIN_BETA);   // tip the top away → see the top of the letters
-    }
-    Y.lg = g; Y.lb = b;
+    /* relative: turning (gamma) and tipping (beta) the phone nudge the sign; the sensor is low-passed and
+       tiny changes are ignored, so a phone held still never makes the sign drift */
+    if (Y.fg == null) { Y.fg = g; Y.fb = b; Y.lg = g; Y.lb = b; }
+    if (Math.abs(g - Y.fg) > 30 || Math.abs(b - Y.fb) > 45) { Y.fg = g; Y.fb = b; Y.lg = g; Y.lb = b; }   // jump (gamma wrap)
+    Y.fg += (g - Y.fg) * ORI_SMOOTH; Y.fb += (b - Y.fb) * ORI_SMOOTH;
+    var dg = Y.fg - Y.lg, db = Y.fb - Y.lb;
+    if (Math.abs(dg) > ORI_DEAD) { nudge(dg * GAIN_TILT); Y.lg = Y.fg; }
+    if (Math.abs(db) > ORI_DEAD) { nudgeX(-db * GAIN_BETA); Y.lb = Y.fb; }
     O.t = now;
     start();
   }
@@ -716,7 +712,9 @@
     window.addEventListener("pointermove", function (e) {
       if (e.pointerType === "touch") return;
       var mx = typeof e.movementX === "number" ? e.movementX : (P.mouse ? e.clientX - P.x : 0);
+      var my = typeof e.movementY === "number" ? e.movementY : (P.mouse ? e.clientY - P.y : 0);
       if (P.mouse && Math.abs(mx) < 200) nudge(mx * GAIN_PX);   // relative: the movement, not the position
+      if (P.mouse && Math.abs(my) < 200) nudgeX(my * GAIN_PX);  // up / down tips it (one-point perspective)
       P.x = e.clientX; P.y = e.clientY; P.on = true; P.mouse = true;
     }, o);
     window.addEventListener("touchstart", function () { Y.lx = null; }, o);
